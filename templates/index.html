@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Twitter/X Media Lister</title>
+<style>
+  :root { --bg:#0f1419; --panel:#1a2230; --border:#2a3546; --fg:#e7e9ea; --muted:#8b98a5; --accent:#1d9bf0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+  .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input[type=text], input[type=number], textarea {
+    background:#0d1520; border:1px solid var(--border); color:var(--fg);
+    border-radius:8px; padding:10px 12px; font-size:14px; outline:none;
+  }
+  input[type=text] { flex:1; min-width:240px; }
+  input[type=number] { width:90px; }
+  textarea { width:100%; min-height:70px; margin-top:10px; font-family:monospace; }
+  button { background:var(--accent); border:none; color:#fff; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.secondary { background:transparent; border:1px solid var(--border); color:var(--fg); }
+  details { margin-top:10px; color:var(--muted); font-size:13px; }
+  details summary { cursor:pointer; }
+  .msg { margin-top:12px; font-size:14px; }
+  .msg.warn { color:#f4a11d; }
+  .msg.err { color:#f4212e; }
+  .msg.ok { color:#00ba7c; }
+  .tabs { display:flex; gap:8px; margin:16px 0; }
+  .tab { background:transparent; border:1px solid var(--border); color:var(--muted); padding:8px 16px; border-radius:20px; font-weight:600; }
+  .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
+  .cell { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
+  .thumb { width:100%; aspect-ratio:1; object-fit:cover; display:block; background:#000; }
+  .vthumb { display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:32px; }
+  .meta { padding:8px 10px; font-size:12px; color:var(--muted); flex:1; overflow:hidden; }
+  .meta .text { max-height:3.6em; overflow:hidden; }
+  .actions { display:flex; gap:6px; padding:0 10px 10px; }
+  .actions a, .actions button { flex:1; text-align:center; font-size:12px; padding:7px 0; border-radius:6px; text-decoration:none; }
+  .dl { background:var(--accent); color:#fff; }
+  .tw { border:1px solid var(--border); color:var(--muted); }
+  .spinner { width:16px; height:16px; border:2px solid var(--muted); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:-3px; margin-right:8px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Twitter/X Media Lister</h1>
+
+  <div class="card">
+    <div class="row">
+      <input id="username" type="text" placeholder="Username, @handle, or profile URL (e.g. https://x.com/nasa)">
+      <input id="limit" type="number" value="200" min="1" max="1000" title="Max media items">
+      <button id="scanBtn" onclick="scan()">Scan</button>
+    </div>
+    <details>
+      <summary>Login cookies (required by X — click for help)</summary>
+      <p>X/Twitter blocks anonymous timeline access. Log in to x.com in your browser, then either:</p>
+      <ul>
+        <li>Export cookies with a "Get cookies.txt" browser extension and paste the whole file here, or</li>
+        <li>Open DevTools → Application → Cookies → x.com, and paste: <code>auth_token=…; ct0=…</code></li>
+      </ul>
+      <textarea id="cookies" placeholder="auth_token=...; ct0=...   (or full cookies.txt export)"></textarea>
+    </details>
+    <div id="status" class="msg"></div>
+  </div>
+
+  <div id="results" style="display:none">
+    <div class="toolbar">
+      <div class="tabs">
+        <button class="tab active" id="tab-images" onclick="showTab('images')">Images (0)</button>
+        <button class="tab" id="tab-videos" onclick="showTab('videos')">Videos (0)</button>
+      </div>
+      <button class="secondary" id="zipBtn" onclick="downloadZip()">Download all in tab as ZIP</button>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<script>
+let data = { images: [], videos: [] };
+let currentTab = 'images';
+
+function setStatus(html, cls) {
+  const el = document.getElementById('status');
+  el.className = 'msg ' + (cls || '');
+  el.innerHTML = html;
+}
+
+async function scan() {
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  document.getElementById('results').style.display = 'none';
+  setStatus('<span class="spinner"></span>Scanning… this can take a minute for large timelines.', '');
+  try {
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        limit: document.getElementById('limit').value,
+        cookies: document.getElementById('cookies').value,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) { setStatus(body.error || 'Scan failed.', 'err'); return; }
+    data.images = body.images || [];
+    data.videos = body.videos || [];
+    document.getElementById('tab-images').textContent = `Images (${data.images.length})`;
+    document.getElementById('tab-videos').textContent = `Videos (${data.videos.length})`;
+    if (body.warning) setStatus(body.warning + (body.detail ? '<br><small>' + escapeHtml(body.detail) + '</small>' : ''), 'warn');
+    else setStatus(escapeHtml(body.note || 'Done.'), 'ok');
+    document.getElementById('results').style.display = 'block';
+    renderGrid();
+  } catch (e) {
+    setStatus('Request failed: ' + e, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-images').classList.toggle('active', tab === 'images');
+  document.getElementById('tab-videos').classList.toggle('active', tab === 'videos');
+  renderGrid();
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  const items = data[currentTab];
+  if (!items.length) {
+    grid.innerHTML = '<p style="color:var(--muted)">Nothing here.</p>';
+    return;
+  }
+  for (const it of items) {
+    const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
+    const thumb = it.kind === 'image'
+      ? `<img class="thumb" loading="lazy" src="${it.url}" alt="">`
+      : `<div class="thumb vthumb">▶</div>`;
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.innerHTML = `
+      ${thumb}
+      <div class="meta">
+        <div>${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
+        <div class="text">${escapeHtml(it.text)}</div>
+      </div>
+      <div class="actions">
+        <a class="dl" href="${dl}">Download</a>
+        ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
+      </div>`;
+    grid.appendChild(cell);
+  }
+}
+
+async function downloadZip() {
+  const items = data[currentTab];
+  const zipBtn = document.getElementById('zipBtn');
+  if (!items.length || zipBtn.disabled) return;
+  zipBtn.disabled = true;
+  const username = document.getElementById('username').value.replace(/\W+/g, '') || 'twitter';
+  setStatus('<span class="spinner"></span>Building ZIP…', '');
+  try {
+    const res = await fetch('/api/zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: `${username}_${currentTab}`,
+        items: items.map(i => ({ url: i.url, name: i.filename })),
+      }),
+    });
+    if (!res.ok) { setStatus('ZIP failed.', 'err'); return; }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${username}_${currentTab}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus('ZIP downloaded.', 'ok');
+  } catch (e) {
+    setStatus('ZIP failed: ' + e, 'err');
+  } finally {
+    zipBtn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
