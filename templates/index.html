@@ -4,51 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Twitter/X Media Lister</title>
-<style>
-  :root { --bg:#0f1419; --panel:#1a2230; --border:#2a3546; --fg:#e7e9ea; --muted:#8b98a5; --accent:#1d9bf0; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
-  .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
-  h1 { font-size:22px; margin:0 0 16px; }
-  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-  input[type=text], input[type=number], textarea {
-    background:#0d1520; border:1px solid var(--border); color:var(--fg);
-    border-radius:8px; padding:10px 12px; font-size:14px; outline:none;
-  }
-  input[type=text] { flex:1; min-width:240px; }
-  input[type=number] { width:90px; }
-  textarea { width:100%; min-height:70px; margin-top:10px; font-family:monospace; }
-  button { background:var(--accent); border:none; color:#fff; padding:10px 18px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:default; }
-  button.secondary { background:transparent; border:1px solid var(--border); color:var(--fg); }
-  details { margin-top:10px; color:var(--muted); font-size:13px; }
-  details summary { cursor:pointer; }
-  .msg { margin-top:12px; font-size:14px; }
-  .msg.warn { color:#f4a11d; }
-  .msg.err { color:#f4212e; }
-  .msg.ok { color:#00ba7c; }
-  .tabs { display:flex; gap:8px; margin:16px 0; }
-  .tab { background:transparent; border:1px solid var(--border); color:var(--muted); padding:8px 16px; border-radius:20px; font-weight:600; }
-  .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
-  .cell { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
-  .thumb { width:100%; aspect-ratio:1; object-fit:cover; display:block; background:#000; }
-  .vthumb { display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:32px; }
-  .meta { padding:8px 10px; font-size:12px; color:var(--muted); flex:1; overflow:hidden; }
-  .meta .text { max-height:3.6em; overflow:hidden; }
-  .actions { display:flex; gap:6px; padding:0 10px 10px; }
-  .actions a, .actions button { flex:1; text-align:center; font-size:12px; padding:7px 0; border-radius:6px; text-decoration:none; }
-  .dl { background:var(--accent); color:#fff; }
-  .tw { border:1px solid var(--border); color:var(--muted); }
-  .spinner { width:16px; height:16px; border:2px solid var(--muted); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:-3px; margin-right:8px; }
-  @keyframes spin { to { transform:rotate(360deg); } }
-  .toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
 </head>
 <body>
 <div class="wrap">
-  <h1>Twitter/X Media Lister</h1>
+  <div class="topbar">
+    <h1>Twitter/X Media Lister</h1>
+    <nav class="nav">
+      <a href="/" class="active">Scanner</a>
+      <a href="/admin">Admin</a>
+      <a href="/admin/characters/new">Character creator</a>
+    </nav>
+  </div>
 
   <div class="card">
     <div class="row">
@@ -56,14 +23,18 @@
       <input id="limit" type="number" value="200" min="1" max="1000" title="Max media items">
       <button id="scanBtn" onclick="scan()">Scan</button>
     </div>
-    <details>
-      <summary>Login cookies (required by X — click for help)</summary>
+    <div class="chips" id="history"></div>
+    <details id="cookieBox">
+      <summary>Login cookies (required by X — click for help) <span id="cookieState" class="muted"></span></summary>
       <p>X/Twitter blocks anonymous timeline access. Log in to x.com in your browser, then either:</p>
       <ul>
-        <li>Export cookies with a "Get cookies.txt" browser extension and paste the whole file here, or</li>
+        <li>Export cookies with a browser extension ("Get cookies.txt" or a JSON cookie exporter) and paste the whole export here, or</li>
         <li>Open DevTools → Application → Cookies → x.com, and paste: <code>auth_token=…; ct0=…</code></li>
       </ul>
-      <textarea id="cookies" placeholder="auth_token=...; ct0=...   (or full cookies.txt export)"></textarea>
+      <textarea id="cookies" placeholder="auth_token=...; ct0=...   (or full cookies.txt / JSON cookie export)"></textarea>
+      <p class="muted">Kept in this browser's local storage and reused on every scan until you change or clear it.
+        <button type="button" class="secondary" id="clearCookiesBtn" onclick="clearCookies()">Clear saved cookies</button>
+      </p>
     </details>
     <div id="status" class="msg"></div>
   </div>
@@ -74,20 +45,177 @@
         <button class="tab active" id="tab-images" onclick="showTab('images')">Images (0)</button>
         <button class="tab" id="tab-videos" onclick="showTab('videos')">Videos (0)</button>
       </div>
-      <button class="secondary" id="zipBtn" onclick="downloadZip()">Download all in tab as ZIP</button>
+      <div class="row">
+        <button class="secondary" id="selectAllBtn" onclick="toggleSelectAll()">Select all</button>
+        <button id="sendBtn" onclick="openSendModal()">Send to character…</button>
+        <button class="secondary" id="zipBtn" onclick="downloadZip()">Download tab as ZIP</button>
+      </div>
     </div>
+    <p class="muted" id="selInfo">Nothing selected — sending will use every item in this tab.</p>
     <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<div class="backdrop" id="sendModal" hidden>
+  <div class="modal">
+    <h2>Send media to a character</h2>
+    <p class="muted" id="sendSummary"></p>
+    <label class="field">
+      <span>Character</span>
+      <select id="charSelect" onchange="onCharSelectChange()"></select>
+    </label>
+    <label class="field" id="newCharField" hidden>
+      <span>New character name</span>
+      <input type="text" id="newCharName" placeholder="e.g. Aria">
+    </label>
+    <div id="sendStatus" class="msg"></div>
+    <div class="row" style="margin-top:16px">
+      <button id="sendConfirm" onclick="sendToCharacter()">Send</button>
+      <button class="secondary" onclick="closeSendModal()">Cancel</button>
+      <div class="spacer"></div>
+      <a href="/admin/characters/new" target="_blank" rel="noopener" style="font-size:13px">Open character creator ↗</a>
+    </div>
   </div>
 </div>
 
 <script>
 let data = { images: [], videos: [] };
 let currentTab = 'images';
+let lastNote = '';
+const selected = { images: new Set(), videos: new Set() };
 
 function setStatus(html, cls) {
   const el = document.getElementById('status');
   el.className = 'msg ' + (cls || '');
   el.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* --- cookie persistence (local storage, kept until changed) --- */
+
+const COOKIE_KEY = 'twmedia.cookies';
+const SCAN_KEY = 'twmedia.lastScan';
+const HISTORY_KEY = 'twmedia.history';
+const HISTORY_MAX = 12;
+
+function lsGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) { return fallback; }
+}
+
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* full / disabled */ }
+}
+
+function cookieStore(action, value) {
+  try {
+    if (action === 'get') return localStorage.getItem(COOKIE_KEY) || '';
+    if (action === 'set') localStorage.setItem(COOKIE_KEY, value);
+    if (action === 'del') localStorage.removeItem(COOKIE_KEY);
+  } catch (e) { /* private mode / storage disabled — fall back to session-only */ }
+  return '';
+}
+
+function updateCookieState() {
+  const saved = document.getElementById('cookies').value.trim();
+  document.getElementById('cookieState').textContent = saved ? '· saved' : '· not set';
+  document.getElementById('clearCookiesBtn').disabled = !saved;
+}
+
+function saveCookies() {
+  const val = document.getElementById('cookies').value;
+  if (val.trim()) cookieStore('set', val); else cookieStore('del');
+  updateCookieState();
+}
+
+function clearCookies() {
+  cookieStore('del');
+  document.getElementById('cookies').value = '';
+  updateCookieState();
+  document.getElementById('cookies').focus();
+}
+
+function initCookies() {
+  const el = document.getElementById('cookies');
+  el.value = cookieStore('get');
+  el.addEventListener('input', saveCookies);
+  el.addEventListener('change', saveCookies);
+  // Another tab changed them — stay in sync instead of overwriting on next save.
+  window.addEventListener('storage', e => {
+    if (e.key === COOKIE_KEY) { el.value = e.newValue || ''; updateCookieState(); }
+  });
+  if (!el.value) document.getElementById('cookieBox').open = true;
+  updateCookieState();
+}
+
+/* --- last scan + search history (survive refresh and tab navigation) --- */
+
+function saveScan() {
+  lsSet(SCAN_KEY, {
+    username: document.getElementById('username').value,
+    limit: document.getElementById('limit').value,
+    tab: currentTab,
+    note: lastNote,
+    images: data.images,
+    videos: data.videos,
+    selected: { images: [...selected.images], videos: [...selected.videos] },
+  });
+}
+
+function restoreScan() {
+  const saved = lsGet(SCAN_KEY, null);
+  if (!saved) return;
+  if (saved.username) document.getElementById('username').value = saved.username;
+  if (saved.limit) document.getElementById('limit').value = saved.limit;
+  data.images = saved.images || [];
+  data.videos = saved.videos || [];
+  if (!data.images.length && !data.videos.length) return;
+  selected.images = new Set((saved.selected && saved.selected.images) || []);
+  selected.videos = new Set((saved.selected && saved.selected.videos) || []);
+  lastNote = saved.note || '';
+  document.getElementById('tab-images').textContent = `Images (${data.images.length})`;
+  document.getElementById('tab-videos').textContent = `Videos (${data.videos.length})`;
+  document.getElementById('results').style.display = 'block';
+  setStatus(`Showing your last scan${saved.username ? ' of ' + escapeHtml(saved.username) : ''}
+             — hit Scan to refresh it.`, '');
+  showTab(saved.tab === 'videos' ? 'videos' : 'images');
+}
+
+function rememberSearch(username, count) {
+  const key = username.toLowerCase();
+  const list = lsGet(HISTORY_KEY, []).filter(h => (h.username || '').toLowerCase() !== key);
+  list.unshift({ username, count, at: Date.now() });
+  lsSet(HISTORY_KEY, list.slice(0, HISTORY_MAX));
+  renderHistory();
+}
+
+function renderHistory() {
+  const box = document.getElementById('history');
+  const list = lsGet(HISTORY_KEY, []);
+  if (!list.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<span class="dim">Recent hits:</span>' + list.map(h => `
+    <span class="chip" data-user="${escapeHtml(h.username)}" title="Scan @${escapeHtml(h.username)} again">
+      @${escapeHtml(h.username)}<span class="n">${h.count}</span>
+      <button type="button" class="x" title="Forget this one">×</button>
+    </span>`).join('');
+  box.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', e => {
+      if (e.target.classList.contains('x')) { forgetSearch(chip.dataset.user); return; }
+      document.getElementById('username').value = chip.dataset.user;
+      scan();
+    });
+  });
+}
+
+function forgetSearch(username) {
+  const key = username.toLowerCase();
+  lsSet(HISTORY_KEY, lsGet(HISTORY_KEY, []).filter(h => (h.username || '').toLowerCase() !== key));
+  renderHistory();
 }
 
 async function scan() {
@@ -109,12 +237,20 @@ async function scan() {
     if (!res.ok) { setStatus(body.error || 'Scan failed.', 'err'); return; }
     data.images = body.images || [];
     data.videos = body.videos || [];
+    selected.images.clear();
+    selected.videos.clear();
     document.getElementById('tab-images').textContent = `Images (${data.images.length})`;
     document.getElementById('tab-videos').textContent = `Videos (${data.videos.length})`;
     if (body.warning) setStatus(body.warning + (body.detail ? '<br><small>' + escapeHtml(body.detail) + '</small>' : ''), 'warn');
     else setStatus(escapeHtml(body.note || 'Done.'), 'ok');
+    lastNote = body.note || '';
     document.getElementById('results').style.display = 'block';
     renderGrid();
+    saveScan();
+    const found = data.images.length + data.videos.length;
+    // Only searches that actually landed media are worth keeping around.
+    const handle = body.username || document.getElementById('username').value.trim().replace(/^@/, '');
+    if (found && handle) rememberSearch(handle, found);
   } catch (e) {
     setStatus('Request failed: ' + e, 'err');
   } finally {
@@ -127,28 +263,79 @@ function showTab(tab) {
   document.getElementById('tab-images').classList.toggle('active', tab === 'images');
   document.getElementById('tab-videos').classList.toggle('active', tab === 'videos');
   renderGrid();
+  saveScan();
 }
 
-function escapeHtml(s) {
-  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function togglePick(url, checked) {
+  const set = selected[currentTab];
+  if (checked) set.add(url); else set.delete(url);
+  document.getElementById('cell-' + hashId(url)).classList.toggle('selected', checked);
+  updateSelInfo();
+  saveScan();
+}
+
+function hashId(url) {
+  let h = 0;
+  for (let i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) | 0;
+  return 'u' + Math.abs(h);
+}
+
+function toggleSelectAll() {
+  const set = selected[currentTab];
+  const items = data[currentTab];
+  if (set.size === items.length) set.clear();
+  else items.forEach(i => set.add(i.url));
+  renderGrid();
+  saveScan();
+}
+
+function updateSelInfo() {
+  const set = selected[currentTab];
+  const total = data[currentTab].length;
+  const info = document.getElementById('selInfo');
+  const picks = selected.images.size + selected.videos.size;
+  if (picks) {
+    // Selections in the other tab count too — that is what actually gets sent.
+    const parts = [];
+    if (selected.images.size) parts.push(`${selected.images.size} image(s)`);
+    if (selected.videos.size) parts.push(`${selected.videos.size} video(s)`);
+    info.textContent = `${parts.join(' + ')} selected across both tabs — only these will be sent.`;
+  } else {
+    info.textContent = `Nothing selected — sending will use all ${total} item(s) in this tab.`;
+  }
+  document.getElementById('selectAllBtn').textContent =
+    set.size === total && total ? 'Clear selection' : 'Select all';
+  document.getElementById('zipBtn').textContent =
+    picks ? 'Download selection as ZIP' : 'Download tab as ZIP';
 }
 
 function renderGrid() {
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
   const items = data[currentTab];
+  updateSelInfo();
   if (!items.length) {
-    grid.innerHTML = '<p style="color:var(--muted)">Nothing here.</p>';
+    grid.innerHTML = '<p class="muted">Nothing here.</p>';
     return;
   }
+  const set = selected[currentTab];
   for (const it of items) {
     const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
     const thumb = it.kind === 'image'
       ? `<img class="thumb" loading="lazy" src="${it.url}" alt="">`
-      : `<div class="thumb vthumb">▶</div>`;
+      : `<div class="thumb vthumb" title="Click to play">
+           ${it.poster
+             ? `<img class="poster" loading="lazy" src="${escapeHtml(it.poster)}" alt="" onerror="this.remove()">`
+             : ''}
+           <span class="play">▶</span>
+           ${it.duration ? `<span class="dur">${formatDuration(it.duration)}</span>` : ''}
+         </div>`;
+    const isPicked = set.has(it.url);
     const cell = document.createElement('div');
-    cell.className = 'cell';
+    cell.className = 'cell' + (isPicked ? ' selected' : '');
+    cell.id = 'cell-' + hashId(it.url);
     cell.innerHTML = `
+      <input class="pick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
       ${thumb}
       <div class="meta">
         <div>${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
@@ -158,12 +345,140 @@ function renderGrid() {
         <a class="dl" href="${dl}">Download</a>
         ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
       </div>`;
+    cell.querySelector('.pick').addEventListener('change', e => togglePick(it.url, e.target.checked));
+    const vthumb = cell.querySelector('.vthumb');
+    if (vthumb) vthumb.addEventListener('click', () => playVideo(vthumb, it));
     grid.appendChild(cell);
   }
 }
 
+function formatDuration(secs) {
+  const s = Math.max(0, Math.round(secs));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function playVideo(placeholder, item) {
+  // Only one video plays at a time; the rest fall back to their placeholder.
+  document.querySelectorAll('video.thumb').forEach(v => { if (!v.paused) v.pause(); });
+  const video = document.createElement('video');
+  video.className = 'thumb';
+  video.src = item.url;
+  if (item.poster) video.poster = item.poster;
+  video.controls = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  video.addEventListener('error', () => {
+    video.replaceWith(placeholder);
+    setStatus('That video would not play inline — use Download or open the tweet.', 'warn');
+  });
+  placeholder.replaceWith(video);
+}
+
+/* --- send to character --- */
+
+function pendingItems() {
+  // Picks made in either tab all travel together; falling back to the visible
+  // tab only when nothing at all is selected.
+  const picked = [
+    ...data.images.filter(i => selected.images.has(i.url)),
+    ...data.videos.filter(i => selected.videos.has(i.url)),
+  ];
+  return picked.length ? picked : data[currentTab];
+}
+
+async function openSendModal() {
+  const items = pendingItems();
+  if (!items.length) { setStatus('Nothing to send in this tab.', 'warn'); return; }
+  const imgs = items.filter(i => i.kind === 'image').length;
+  const vids = items.length - imgs;
+  const what = [imgs ? `${imgs} image(s)` : '', vids ? `${vids} video(s)` : ''].filter(Boolean).join(' + ');
+  document.getElementById('sendSummary').textContent =
+    `${what} will be copied into the character's library.`;
+  document.getElementById('sendStatus').textContent = '';
+  document.getElementById('sendModal').hidden = false;
+
+  const select = document.getElementById('charSelect');
+  select.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const res = await fetch('/api/characters');
+    const body = await res.json();
+    const options = (body.characters || []).map(c =>
+      `<option value="${c.id}">${escapeHtml(c.name)} (${c.image_count} img / ${c.video_count} vid)</option>`);
+    select.innerHTML = options.join('') + '<option value="__new__">＋ Create a new character…</option>';
+    if (!options.length) select.value = '__new__';
+  } catch (e) {
+    select.innerHTML = '<option value="__new__">＋ Create a new character…</option>';
+  }
+  onCharSelectChange();
+}
+
+function onCharSelectChange() {
+  const isNew = document.getElementById('charSelect').value === '__new__';
+  document.getElementById('newCharField').hidden = !isNew;
+  if (isNew) {
+    const input = document.getElementById('newCharName');
+    if (!input.value) input.value = document.getElementById('username').value.replace(/^@|.*\//, '');
+    input.focus();
+  }
+}
+
+function closeSendModal() {
+  document.getElementById('sendModal').hidden = true;
+}
+
+async function sendToCharacter() {
+  const btn = document.getElementById('sendConfirm');
+  const msg = document.getElementById('sendStatus');
+  const items = pendingItems();
+  const choice = document.getElementById('charSelect').value;
+  btn.disabled = true;
+  msg.className = 'msg';
+  msg.innerHTML = '<span class="spinner"></span>Sending…';
+  try {
+    let charId = choice;
+    if (choice === '__new__') {
+      const name = document.getElementById('newCharName').value.trim();
+      if (!name) { msg.className = 'msg err'; msg.textContent = 'Give the new character a name.'; return; }
+      const res = await fetch('/api/characters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, handle: document.getElementById('username').value }),
+      });
+      const body = await res.json();
+      if (!res.ok) { msg.className = 'msg err'; msg.textContent = body.error || 'Could not create character.'; return; }
+      charId = body.character.id;
+    }
+    if (!charId) { msg.className = 'msg err'; msg.textContent = 'Pick a character first.'; return; }
+
+    const res = await fetch(`/api/characters/${charId}/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: items.map(i => ({
+          url: i.url, filename: i.filename, kind: i.kind,
+          text: i.text, tweet_url: i.tweet_url,
+        })),
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) { msg.className = 'msg err'; msg.textContent = body.error || 'Send failed.'; return; }
+    closeSendModal();
+    const parts = [`Sent ${body.added} item(s) to ${escapeHtml(body.character.name)}`];
+    if (body.skipped) parts.push(`${body.skipped} already there`);
+    if (body.failed_count) parts.push(`${body.failed_count} failed`);
+    setStatus(parts.join(' · ') + ` — <a href="/admin/characters/${charId}">open character ↗</a>`,
+              body.added ? 'ok' : 'warn');
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = 'Send failed: ' + e;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function downloadZip() {
-  const items = data[currentTab];
+  const items = pendingItems();
   const zipBtn = document.getElementById('zipBtn');
   if (!items.length || zipBtn.disabled) return;
   zipBtn.disabled = true;
@@ -192,6 +507,18 @@ async function downloadZip() {
     zipBtn.disabled = false;
   }
 }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSendModal();
+});
+
+initCookies();
+renderHistory();
+restoreScan();
+
+// Keep the username/limit for the next visit even without a scan.
+['username', 'limit'].forEach(id =>
+  document.getElementById(id).addEventListener('change', saveScan));
 </script>
 </body>
 </html>

@@ -16,16 +16,20 @@ from urllib.parse import urlparse
 import requests
 from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 
+import publish
+import store
+from admin import bp as admin_bp
+from fetch import UA, is_allowed_media_url
+
+# Local .env (gitignored) — supplies MYAIMODELMANAGER_API_KEY when the user
+# hasn't typed a key into the admin page. Loaded before anything reads it.
+publish.load_env()
+
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2 GB uploads (videos)
+app.register_blueprint(admin_bp)
+store.init_db()
 
-UA = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-    )
-}
-
-ALLOWED_MEDIA_HOSTS = ("twimg.com",)
 VIDEO_EXTS = {"mp4", "m4v", "mov"}
 MAX_SCAN_LIMIT = 1000
 
@@ -52,12 +56,45 @@ def parse_username(text):
 def build_cookie_file(raw):
     """Turn user input into a Netscape cookie file.
 
-    Accepts either a full Netscape cookies.txt export or a header-style
-    string like 'auth_token=...; ct0=...'.
+    Accepts a full Netscape cookies.txt export, a JSON cookie export
+    (array of {name, value, domain, path, secure, expirationDate, ...}
+    objects, as produced by browser extensions like "Get cookies.txt
+    LOCALLY" or EditThisCookie), or a header-style string like
+    'auth_token=...; ct0=...'.
     """
     raw = raw.strip()
     if not raw:
         return None
+    if raw.startswith("{") or raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        if isinstance(parsed, list) and parsed and all(
+            isinstance(c, dict) and c.get("name") and "value" in c
+            for c in parsed
+        ):
+            lines = ["# Netscape HTTP Cookie File"]
+            for c in parsed:
+                domain = c.get("domain") or ".x.com"
+                include_subdomains = "FALSE" if c.get("hostOnly") else "TRUE"
+                path = c.get("path") or "/"
+                secure = "TRUE" if c.get("secure") else "FALSE"
+                try:
+                    expires = int(float(c.get("expirationDate") or 0))
+                except (TypeError, ValueError):
+                    expires = 0
+                if c.get("session") or expires <= 0:
+                    expires = 2000000000
+                lines.append(
+                    f"{domain}\t{include_subdomains}\t{path}\t{secure}"
+                    f"\t{expires}\t{c['name']}\t{c['value']}"
+                )
+            content = "\n".join(lines) + "\n"
+            return _write_cookie_file(content)
+        # fall through: treat as header-style string
     if "\t" in raw and ("twitter.com" in raw or "x.com" in raw):
         content = raw
     else:
@@ -73,6 +110,10 @@ def build_cookie_file(raw):
             for k, v in pairs.items():
                 lines.append(f"{domain}\tTRUE\t/\tTRUE\t2000000000\t{k}\t{v}")
         content = "\n".join(lines) + "\n"
+    return _write_cookie_file(content)
+
+
+def _write_cookie_file(content):
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", prefix="twcookies_", delete=False
     )
@@ -90,6 +131,10 @@ def classify_entry(entry):
     if not ext or not isinstance(url, str):
         return None
     kind = "video" if ext in VIDEO_EXTS else "image"
+    # gallery-dl emits a still frame right after each video (previews=true);
+    # it is a poster for that video, not a gallery item of its own.
+    if (meta.get("type") or "").lower() == "preview":
+        kind = "preview"
     author = meta.get("author") or meta.get("user") or {}
     nick = author.get("nick") or author.get("name") or ""
     tweet_id = meta.get("tweet_id") or meta.get("id")
@@ -104,7 +149,17 @@ def classify_entry(entry):
         "text": (meta.get("content") or "").strip(),
         "user": nick,
         "tweet_url": f"https://x.com/i/status/{tweet_id}" if tweet_id else "",
+        "tweet_id": str(tweet_id or ""),
+        "poster": "",
+        "duration": _as_seconds(meta.get("duration")),
     }
+
+
+def _as_seconds(value):
+    try:
+        return round(float(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 @app.route("/")
@@ -126,11 +181,14 @@ def scan():
     cookie_path = build_cookie_file(data.get("cookies") or "")
     timeline_url = f"https://twitter.com/{username}/media"
 
+    # Previews are extra files, so ask for headroom above the user's limit and
+    # trim back to it once the still frames have been folded into their videos.
     cmd = [
         sys.executable, "-m", "gallery_dl",
         "--dump-json",
-        "--range", f"1-{limit}",
+        "--range", f"1-{min(limit * 2, MAX_SCAN_LIMIT * 2)}",
         "--retries", "3",
+        "-o", "previews=true",
     ]
     if cookie_path:
         cmd += ["--cookies", cookie_path]
@@ -158,6 +216,18 @@ def scan():
             seen.add(item["url"])
             items.append(item)
 
+    # Each tweet's previews arrive in the same order as its videos.
+    previews = {}
+    for item in items:
+        if item["kind"] == "preview":
+            previews.setdefault(item["tweet_id"], []).append(item["url"])
+    for item in items:
+        if item["kind"] == "video":
+            queue = previews.get(item["tweet_id"])
+            if queue:
+                item["poster"] = queue.pop(0)
+    items = [i for i in items if i["kind"] != "preview"][:limit]
+
     if not items:
         stderr_tail = (proc.stderr or "").strip().splitlines()[-3:]
         hint = (
@@ -176,13 +246,13 @@ def scan():
     return jsonify({
         "images": images,
         "videos": videos,
+        "username": username,
         "note": f"Scanned @{username} (up to {limit} media items).",
     })
 
 
 def _check_media_url(url):
-    host = urlparse(url).hostname or ""
-    return any(host == d or host.endswith("." + d) for d in ALLOWED_MEDIA_HOSTS)
+    return is_allowed_media_url(url)
 
 
 @app.get("/api/download")

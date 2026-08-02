@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Characters</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+<style>
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+  .stat {
+    background:var(--glass); border:1px solid var(--glass-border); border-radius:var(--r-lg);
+    padding:16px 18px; box-shadow:var(--shadow-sm);
+    -webkit-backdrop-filter:blur(var(--blur)); backdrop-filter:blur(var(--blur));
+  }
+  .stat b { display:block; font-size:26px; font-weight:700; }
+  .stat span { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  .chars { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+  .char {
+    background:var(--glass); border:1px solid var(--glass-border); border-radius:var(--r-lg);
+    overflow:hidden; display:flex; flex-direction:column; box-shadow:var(--shadow-sm);
+    -webkit-backdrop-filter:blur(var(--blur)); backdrop-filter:blur(var(--blur));
+    transition:border-color var(--t-fast), transform var(--t-fast);
+  }
+  .char:hover { border-color:rgba(130,64,255,.35); transform:translateY(-2px); }
+  .char .avatar { width:100%; aspect-ratio:16/9; object-fit:cover; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:28px; }
+  .char .body { padding:12px 14px; flex:1; }
+  .char .body h3 { margin:0 0 4px; font-size:15px; }
+  .char .body .handle { color:var(--dim); font-size:12px; }
+  .char .body p { margin:8px 0 0; font-size:12px; color:var(--muted); max-height:3.6em; overflow:hidden; }
+  .pills { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .pill { font-size:11px; border:1px solid var(--glass-border); color:var(--muted); border-radius:var(--r-pill); padding:3px 9px; }
+  .empty { text-align:center; padding:40px 16px; color:var(--muted); }
+  .keyrow { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .keyrow label.field { flex:1; min-width:260px; margin-bottom:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>Admin dashboard</h1>
+    <nav class="nav">
+      <a href="/">Scanner</a>
+      <a href="/admin" class="active">Admin</a>
+      <a href="/admin/characters/new">Character creator</a>
+    </nav>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>{{ stats.characters }}</b><span>Characters</span></div>
+    <div class="stat"><b>{{ stats.images }}</b><span>Images</span></div>
+    <div class="stat"><b>{{ stats.videos }}</b><span>Videos</span></div>
+    <div class="stat"><b>{{ stats.total_bytes | filesizeformat }}</b><span>Stored</span></div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <h2 style="margin:0">myaimodelmanager connection</h2>
+      {% if publish_settings.configured %}
+        <span class="badge ok" id="keyBadge">Key {{ publish_settings.key_preview }}
+          · {{ 'saved locally' if publish_settings.key_source == 'saved' else 'from .env' }}</span>
+      {% else %}
+        <span class="badge off" id="keyBadge">No API key</span>
+      {% endif %}
+    </div>
+    <p class="dim" style="margin:8px 0 14px">
+      Your key is stored on this machine only — in the local database or a
+      gitignored <code>.env</code>. It is never sent to the browser and never
+      committed. Publishing a character sends it to
+      <span id="baseLabel">{{ publish_settings.base_url }}</span>.
+    </p>
+    <div class="keyrow">
+      <label class="field"><span>API key</span>
+        <input type="password" id="f-key" autocomplete="off" spellcheck="false"
+               placeholder="{{ 'Leave blank to keep the current key' if publish_settings.configured else 'clx_…' }}"></label>
+      <label class="field"><span>API base URL</span>
+        <input type="text" id="f-base" value="{{ publish_settings.base_url }}" placeholder="https://myaimodelmanager.com"></label>
+      <button onclick="saveKey()" id="saveKeyBtn">Save</button>
+      <button class="secondary" onclick="testKey()" id="testKeyBtn">Test connection</button>
+      {% if publish_settings.key_source == 'saved' %}
+        <button class="danger" onclick="clearKey()">Clear saved key</button>
+      {% endif %}
+    </div>
+    <div id="keyStatus" class="msg"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <input type="search" id="filter" placeholder="Filter characters by name, handle, or tag" oninput="applyFilter()">
+      <button onclick="location.href='/admin/characters/new'">＋ New character</button>
+    </div>
+    <div id="status" class="msg"></div>
+  </div>
+
+  {% if characters %}
+  <div class="chars" id="chars">
+    {% for c in characters %}
+    <div class="char" data-id="{{ c.id }}"
+         data-search="{{ (c.name ~ ' ' ~ c.handle ~ ' ' ~ c.tags) | lower }}">
+      {% if c.avatar_filename %}
+        <img class="avatar" src="/media/{{ c.id }}/{{ c.avatar_filename }}" alt="">
+      {% else %}
+        <div class="avatar">🎭</div>
+      {% endif %}
+      <div class="body">
+        <h3>{{ c.name }}</h3>
+        <div class="handle">{% if c.handle %}@{{ c.handle }} · {% endif %}updated {{ c.updated_at[:10] }}</div>
+        {% if c.description %}<p>{{ c.description }}</p>{% endif %}
+        <div class="pills">
+          <span class="pill">{{ c.image_count }} images</span>
+          <span class="pill">{{ c.video_count }} videos</span>
+          <span class="pill">{{ c.total_bytes | filesizeformat }}</span>
+          {% for tag in c.tags.split(',') if tag.strip() %}
+            <span class="pill">#{{ tag.strip() }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="actions">
+        <a class="dl" href="/admin/characters/{{ c.id }}">Open</a>
+        <button onclick="removeCharacter({{ c.id }}, this)">Delete</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="empty" id="noMatch" hidden>No character matches that filter.</p>
+  {% else %}
+  <div class="card empty">
+    <p>No characters yet.</p>
+    <p><a href="/admin/characters/new">Create one in the character creator</a>, or scan a timeline and send media straight into a new character.</p>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+/* --- myaimodelmanager key --- */
+
+function keyStatus(html, cls) {
+  const el = document.getElementById('keyStatus');
+  el.className = 'msg ' + (cls || '');
+  el.innerHTML = html;
+}
+
+function renderKeyBadge(settings) {
+  const badge = document.getElementById('keyBadge');
+  if (settings.configured) {
+    badge.className = 'badge ok';
+    badge.textContent = `Key ${settings.key_preview} · `
+      + (settings.key_source === 'saved' ? 'saved locally' : 'from .env');
+  } else {
+    badge.className = 'badge off';
+    badge.textContent = 'No API key';
+  }
+  document.getElementById('baseLabel').textContent = settings.base_url;
+}
+
+async function saveKey() {
+  const btn = document.getElementById('saveKeyBtn');
+  const keyField = document.getElementById('f-key');
+  const body = { base_url: document.getElementById('f-base').value.trim() };
+  // Only send the key when one was actually typed, so saving a base URL
+  // never wipes the key that's already stored.
+  if (keyField.value.trim()) body.api_key = keyField.value.trim();
+
+  btn.disabled = true;
+  keyStatus('<span class="spinner"></span>Saving…');
+  try {
+    const res = await fetch('/api/publish/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const settings = await res.json();
+    if (!res.ok) { keyStatus(settings.error || 'Could not save.', 'err'); return; }
+    keyField.value = '';
+    keyField.placeholder = settings.configured ? 'Leave blank to keep the current key' : 'clx_…';
+    renderKeyBadge(settings);
+    keyStatus('Saved on this machine.', 'ok');
+  } catch (e) {
+    keyStatus('Could not save: ' + e, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function clearKey() {
+  if (!confirm('Remove the saved API key? The app will fall back to .env if one is set there.')) return;
+  const res = await fetch('/api/publish/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: '' }),
+  });
+  const settings = await res.json();
+  renderKeyBadge(settings);
+  keyStatus('Saved key removed.', 'ok');
+}
+
+async function testKey() {
+  const btn = document.getElementById('testKeyBtn');
+  btn.disabled = true;
+  keyStatus('<span class="spinner"></span>Checking…');
+  try {
+    const res = await fetch('/api/publish/test', { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) { keyStatus(body.error || 'Connection failed.', 'err'); return; }
+    const who = body.account.username || body.account.email || body.account.userId;
+    keyStatus(`Connected as <b>${who}</b> — ${body.account.characterCount} character(s) on the account.`, 'ok');
+    renderKeyBadge(body.settings);
+  } catch (e) {
+    keyStatus('Connection failed: ' + e, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* --- characters --- */
+
+function applyFilter() {
+  const q = document.getElementById('filter').value.trim().toLowerCase();
+  const cards = document.querySelectorAll('.char');
+  let visible = 0;
+  cards.forEach(card => {
+    const hit = !q || card.dataset.search.includes(q);
+    card.hidden = !hit;
+    if (hit) visible++;
+  });
+  const none = document.getElementById('noMatch');
+  if (none) none.hidden = visible !== 0;
+}
+
+async function removeCharacter(id, btn) {
+  const card = btn.closest('.char');
+  const name = card.querySelector('h3').textContent;
+  if (!confirm(`Delete "${name}" and all of its stored media? This cannot be undone.`)) return;
+  btn.disabled = true;
+  const status = document.getElementById('status');
+  try {
+    const res = await fetch(`/api/characters/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || 'Delete failed');
+    card.remove();
+    status.className = 'msg ok';
+    status.textContent = `Deleted "${name}".`;
+  } catch (e) {
+    btn.disabled = false;
+    status.className = 'msg err';
+    status.textContent = String(e);
+  }
+}
+</script>
+</body>
+</html>
