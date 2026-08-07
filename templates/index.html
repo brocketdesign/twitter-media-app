@@ -1,21 +1,58 @@
+{% import '_brand.html' as brand with context %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Twitter/X Media Lister</title>
+{{ brand.head(
+  'Twitter/X Media Downloader — Download All Images & Videos From Any X Account',
+  'Free Twitter/X media downloader. Paste any @handle or profile URL to list '
+  'every image and video that account posted, preview them in separate tabs, '
+  'and download them one by one or as a ZIP.',
+  '/'
+) }}
 <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Twitter/X Media Downloader",
+  "url": "{{ site_url }}/",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Any (web browser)",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "description": "List and download every image and video posted by a Twitter/X account.",
+  "featureList": [
+    "Download images from a Twitter/X account",
+    "Download videos from a Twitter/X account",
+    "Bulk download all media as a ZIP",
+    "Separate image and video tabs with previews"
+  ],
+  "isRelatedTo": {
+    "@type": "WebApplication",
+    "name": "{{ brand_name }}",
+    "url": "{{ brand_url }}"
+  }
+}
+</script>
 </head>
 <body>
 <div class="wrap">
   <div class="topbar">
-    <h1>Twitter/X Media Lister</h1>
+    <div class="brandmark">
+      <img src="{{ url_for('static', filename='img/mam-logo.png') }}"
+           alt="{{ brand_name }}" width="36" height="36">
+      <div>
+        <h1>Twitter/X Media Downloader</h1>
+        <p class="tagline">Download every image and video from any Twitter/X account — free, in your browser.</p>
+      </div>
+    </div>
     <nav class="nav">
       <a href="/" class="active">Scanner</a>
       <a href="/admin">Admin</a>
       <a href="/admin/characters/new">Character creator</a>
     </nav>
   </div>
+
+  {{ brand.promo_banner() }}
 
   <div class="card">
     <div class="row">

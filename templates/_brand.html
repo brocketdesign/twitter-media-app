@@ -1,0 +1,79 @@
+{# Shared <head> metadata and MyAIModelManager promo blocks.
+
+   `site_url`, `brand_name`, `brand_url` and `brand_tagline` come from the
+   context processor in app.py, so every template gets them for free. #}
+
+{% macro head(title, description, path='/', noindex=False) -%}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<meta name="description" content="{{ description }}">
+<link rel="canonical" href="{{ site_url }}{{ path }}">
+{% if noindex -%}
+<meta name="robots" content="noindex, nofollow">
+{%- else -%}
+<meta name="robots" content="index, follow, max-image-preview:large">
+{%- endif %}
+
+<link rel="icon" type="image/png" sizes="256x256" href="{{ url_for('static', filename='img/mam-logo.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='img/mam-logo.png') }}">
+<meta name="theme-color" content="#0a0810">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Twitter/X Media Downloader">
+<meta property="og:title" content="{{ title }}">
+<meta property="og:description" content="{{ description }}">
+<meta property="og:url" content="{{ site_url }}{{ path }}">
+<meta property="og:image" content="{{ site_url }}{{ url_for('static', filename='img/mam-logo.png') }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ title }}">
+<meta name="twitter:description" content="{{ description }}">
+<meta name="twitter:image" content="{{ site_url }}{{ url_for('static', filename='img/mam-logo.png') }}">
+{%- endmacro %}
+
+
+{# Full promo panel — used on the admin dashboard and the character creator. #}
+{% macro promo_card(context='') -%}
+<aside class="promo">
+  <img class="promo-logo" src="{{ url_for('static', filename='img/mam-logo.png') }}"
+       alt="{{ brand_name }} logo" width="56" height="56" loading="lazy">
+  <div class="promo-body">
+    <h2>Powered by {{ brand_name }}</h2>
+    <p>
+      {{ brand_tagline }}
+      {%- if context == 'creator' %}
+      Finish this profile, hit <b>Publish</b>, and the character —
+      avatar, description and every image or video you attached — lands on
+      {{ brand_name }}, where you can start chatting with it straight away.
+      {%- elif context == 'admin' %}
+      Every character in the library below can be pushed to {{ brand_name }}
+      with one click. Import a character, publish it, and chat with it there.
+      {%- else %}
+      Import a character, upload its images and videos, and chat with it.
+      {%- endif %}
+    </p>
+    <a class="promo-cta" href="{{ brand_url }}" target="_blank" rel="noopener">
+      Open {{ brand_name }} ↗
+    </a>
+  </div>
+</aside>
+{%- endmacro %}
+
+
+{# Compact banner — used on the public scanner page. #}
+{% macro promo_banner() -%}
+<aside class="promo promo-slim">
+  <img class="promo-logo" src="{{ url_for('static', filename='img/mam-logo.png') }}"
+       alt="{{ brand_name }} logo" width="40" height="40" loading="lazy">
+  <div class="promo-body">
+    <p>
+      <b>Downloaded your media? Bring it to life on {{ brand_name }}.</b>
+      {{ brand_tagline }} Import a new character, attach the images and
+      videos you just grabbed, and chat with it.
+    </p>
+  </div>
+  <a class="promo-cta" href="{{ brand_url }}" target="_blank" rel="noopener">
+    Try {{ brand_name }} ↗
+  </a>
+</aside>
+{%- endmacro %}

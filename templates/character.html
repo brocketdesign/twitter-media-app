@@ -1,9 +1,14 @@
+{% import '_brand.html' as brand with context %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if character %}{{ character.name }} — Character{% else %}New character{% endif %}</title>
+{{ brand.head(
+  (character.name ~ ' — Character') if character else 'New character — Character creator',
+  'Build a character profile, attach its images and videos, and publish it to '
+  ~ brand_name ~ ' to start chatting with it.',
+  ('/admin/characters/' ~ character.id) if character else '/admin/characters/new',
+  noindex=True
+) }}
 <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
 <style>
   .cols { display:grid; grid-template-columns:320px 1fr; gap:16px; align-items:start; }
@@ -34,6 +39,8 @@
       <a href="/admin/characters/new" class="{% if not character %}active{% endif %}">Character creator</a>
     </nav>
   </div>
+
+  {{ brand.promo_card('creator') }}
 
   <div class="cols">
     <div class="card">

@@ -6,6 +6,7 @@ Media files live on disk under DATA_DIR/media/<character_id>/.
 """
 
 import mimetypes
+import os
 import re
 import sqlite3
 import uuid
@@ -13,7 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+# Hosted deployments have an ephemeral filesystem, so point DATA_DIR at a
+# mounted volume there — otherwise the database and every uploaded file are
+# wiped on each redeploy. Defaults to ./data for local runs.
+DATA_DIR = Path(os.environ.get("DATA_DIR") or (BASE_DIR / "data"))
 MEDIA_DIR = DATA_DIR / "media"
 DB_PATH = DATA_DIR / "app.db"
 

@@ -305,3 +305,59 @@ video.thumb { object-fit: contain; }
   color: var(--dim); border-radius: 50%;
 }
 .chip .x:hover:not(:disabled) { background: rgba(251, 113, 133, .16); color: var(--err); transform: none; }
+
+/* --- site brandmark (landing page header) --- */
+.brandmark { display: flex; align-items: center; gap: 12px; flex: 1 1 460px; min-width: 0; }
+.brandmark img { border-radius: var(--r-sm); flex: none; }
+.brandmark h1 { margin: 0; }
+.tagline { margin: 3px 0 0; color: var(--muted); font-size: 13px; max-width: 52ch; }
+
+/* --- MyAIModelManager promo --- */
+.promo {
+  display: flex; gap: 14px; align-items: flex-start;
+  background: linear-gradient(135deg, rgba(130, 64, 255, .14), rgba(181, 138, 254, .06));
+  border: 1px solid rgba(130, 64, 255, .30);
+  border-radius: var(--r-lg); padding: 16px 18px; margin-bottom: 16px;
+  -webkit-backdrop-filter: blur(var(--blur)); backdrop-filter: blur(var(--blur));
+}
+.promo-logo { border-radius: var(--r-sm); flex: none; }
+.promo-body { flex: 1; min-width: 0; }
+.promo-body h2 { margin: 0 0 6px; font-size: 15px; }
+.promo-body p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.promo-body b { color: var(--fg); font-weight: 600; }
+.promo-cta {
+  display: inline-block; margin-top: 12px; padding: 9px 16px;
+  background: var(--brand-grad); color: #fff; text-decoration: none;
+  font-size: 13px; font-weight: 600; border-radius: var(--r-pill);
+  box-shadow: var(--brand-glow); transition: background var(--t-fast);
+  white-space: nowrap;
+}
+.promo-cta:hover { background: var(--brand-grad-hover); color: #fff; }
+
+/* slim variant: CTA sits inline on the right */
+.promo-slim { align-items: center; }
+.promo-slim .promo-cta { margin-top: 0; flex: none; align-self: center; }
+@media (max-width: 700px) {
+  .promo, .promo-slim { flex-wrap: wrap; }
+  .promo-slim .promo-cta { margin-top: 4px; }
+}
+
+/* --- narrow screens ---------------------------------------------------
+   Flex children default to min-width:auto, so long placeholders (the
+   username field, the promo copy) pushed the page wider than the phone
+   viewport. Let them shrink, and give the primary inputs a full row. */
+img, video { max-width: 100%; }
+.row > *, .toolbar > *, .promo > * { min-width: 0; }
+
+@media (max-width: 640px) {
+  .wrap { padding-left: 14px; padding-right: 14px; }
+  .row > input[type=text],
+  .row > input[type=search],
+  .row > input[type=number] { flex: 1 1 100%; }
+  .row > button, .toolbar > .row > button { flex: 1 1 auto; }
+  .promo, .promo-slim { flex-direction: column; align-items: flex-start; }
+  .promo-slim .promo-cta { margin-top: 10px; align-self: flex-start; }
+  .promo-cta { white-space: normal; }
+  .brandmark { flex-basis: 100%; }
+  .tagline { max-width: none; }
+}

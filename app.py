@@ -5,6 +5,7 @@ and get images and videos listed separately, ready to download.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -32,6 +33,59 @@ store.init_db()
 
 VIDEO_EXTS = {"mp4", "m4v", "mov"}
 MAX_SCAN_LIMIT = 1000
+
+# --- public site / branding -------------------------------------------
+# SITE_URL is the origin this app is served from once it is online; it is
+# what canonical + Open Graph URLs are built from. Left unset (local dev)
+# we fall back to whatever host the request came in on.
+SITE_URL = os.environ.get("SITE_URL", "").rstrip("/")
+
+BRAND_NAME = "MyAIModelManager"
+BRAND_URL = os.environ.get("BRAND_URL", "https://myaimodelmanager.com").rstrip("/")
+BRAND_TAGLINE = (
+    "MyAIModelManager is an AI character platform — upload characters and "
+    "their media, then talk to them."
+)
+
+
+@app.context_processor
+def inject_brand():
+    return {
+        "site_url": SITE_URL or request.url_root.rstrip("/"),
+        "brand_name": BRAND_NAME,
+        "brand_url": BRAND_URL,
+        "brand_tagline": BRAND_TAGLINE,
+    }
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    """Let crawlers have the landing page; keep the private dashboards out."""
+    root = SITE_URL or request.url_root.rstrip("/")
+    body = (
+        "User-agent: *\n"
+        "Allow: /$\n"
+        "Disallow: /admin\n"
+        "Disallow: /api/\n"
+        "Disallow: /download\n"
+        "Disallow: /zip\n"
+        "Disallow: /media/\n"
+        f"\nSitemap: {root}/sitemap.xml\n"
+    )
+    return Response(body, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    root = SITE_URL or request.url_root.rstrip("/")
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"  <url><loc>{root}/</loc><changefreq>weekly</changefreq>"
+        "<priority>1.0</priority></url>\n"
+        "</urlset>\n"
+    )
+    return Response(body, mimetype="application/xml")
 
 
 def parse_username(text):

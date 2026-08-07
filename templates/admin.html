@@ -1,9 +1,14 @@
+{% import '_brand.html' as brand with context %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin — Characters</title>
+{{ brand.head(
+  'Admin — Character library',
+  'Local character library: browse characters, their images and videos, and publish them to '
+  ~ brand_name ~ '.',
+  '/admin',
+  noindex=True
+) }}
 <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
 <style>
   .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
@@ -44,6 +49,8 @@
       <a href="/admin/characters/new">Character creator</a>
     </nav>
   </div>
+
+  {{ brand.promo_card('admin') }}
 
   <div class="stats">
     <div class="stat"><b>{{ stats.characters }}</b><span>Characters</span></div>
