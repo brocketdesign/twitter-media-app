@@ -361,3 +361,23 @@ img, video { max-width: 100%; }
   .brandmark { flex-basis: 100%; }
   .tagline { max-width: none; }
 }
+
+/* --- long-form copy at the foot of the landing page --- */
+.seo { margin-top: 40px; padding-top: 28px; border-top: 1px solid var(--border); max-width: 74ch; }
+.seo h2 { font-size: 20px; margin: 0 0 12px; }
+.seo h3 { font-size: 15px; margin: 28px 0 10px; }
+.seo p { color: var(--muted); font-size: 14px; line-height: 1.7; margin: 0 0 12px; }
+.seo a { color: var(--accent); }
+.seo b { color: var(--fg); font-weight: 600; }
+.seo code {
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--glass-border);
+  border-radius: 4px; padding: 1px 5px; font-size: 13px;
+}
+.seo-list { margin: 0; }
+.seo-list dt {
+  color: var(--fg); font-size: 14px; font-weight: 600; margin-top: 18px;
+  padding-left: 14px; border-left: 2px solid var(--accent);
+}
+.seo-list dd {
+  margin: 6px 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.7;
+}

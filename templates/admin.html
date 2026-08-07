@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 {{ brand.head(
-  'Admin — Character library',
+  'Gallery — Your character library',
   'Local character library: browse characters, their images and videos, and publish them to '
   ~ brand_name ~ '.',
   '/admin',
@@ -42,10 +42,10 @@
 <body>
 <div class="wrap">
   <div class="topbar">
-    <h1>Admin dashboard</h1>
+    <h1>Gallery</h1>
     <nav class="nav">
       <a href="/">Scanner</a>
-      <a href="/admin" class="active">Admin</a>
+      <a href="/admin" class="active">Gallery</a>
       <a href="/admin/characters/new">Character creator</a>
     </nav>
   </div>
@@ -61,19 +61,27 @@
 
   <div class="card">
     <div class="toolbar">
-      <h2 style="margin:0">myaimodelmanager connection</h2>
+      <h2 style="margin:0">{{ brand_name }} connection</h2>
       {% if publish_settings.configured %}
         <span class="badge ok" id="keyBadge">Key {{ publish_settings.key_preview }}
-          · {{ 'saved locally' if publish_settings.key_source == 'saved' else 'from .env' }}</span>
+          · {{ 'saved' if publish_settings.key_source == 'saved' else 'from environment' }}</span>
       {% else %}
         <span class="badge off" id="keyBadge">No API key</span>
       {% endif %}
     </div>
-    <p class="dim" style="margin:8px 0 14px">
-      Your key is stored on this machine only — in the local database or a
-      gitignored <code>.env</code>. It is never sent to the browser and never
-      committed. Publishing a character sends it to
-      <span id="baseLabel">{{ publish_settings.base_url }}</span>.
+    <p class="dim" style="margin:8px 0 6px">
+      Publishing runs on your own {{ brand_name }} account, so it needs your own
+      API key — there is no shared one. Head to
+      <a href="{{ brand_url }}" target="_blank" rel="noopener">{{ brand_name }}</a>,
+      create an account, and generate a key under your account's API keys. Paste
+      it below and you can publish a character — its profile, its images and its
+      videos — then chat with it on the platform.
+    </p>
+    <p class="dim" style="margin:0 0 14px">
+      The key is only ever shown back to you masked
+      ({{ publish_settings.key_preview or 'clx_ABCD…WXYZ' }}), never in full.
+      Publishing sends it to
+      <span id="baseLabel">{{ publish_settings.base_url }}</span> and nowhere else.
     </p>
     <div class="keyrow">
       <label class="field"><span>API key</span>
@@ -138,7 +146,7 @@
 </div>
 
 <script>
-/* --- myaimodelmanager key --- */
+/* --- MyAIModelManager key --- */
 
 function keyStatus(html, cls) {
   const el = document.getElementById('keyStatus');
@@ -151,7 +159,7 @@ function renderKeyBadge(settings) {
   if (settings.configured) {
     badge.className = 'badge ok';
     badge.textContent = `Key ${settings.key_preview} · `
-      + (settings.key_source === 'saved' ? 'saved locally' : 'from .env');
+      + (settings.key_source === 'saved' ? 'saved' : 'from environment');
   } else {
     badge.className = 'badge off';
     badge.textContent = 'No API key';
@@ -189,7 +197,7 @@ async function saveKey() {
 }
 
 async function clearKey() {
-  if (!confirm('Remove the saved API key? The app will fall back to .env if one is set there.')) return;
+  if (!confirm('Remove the saved API key? Publishing stops working until you paste a key again.')) return;
   const res = await fetch('/api/publish/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

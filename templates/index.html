@@ -47,7 +47,7 @@
     </div>
     <nav class="nav">
       <a href="/" class="active">Scanner</a>
-      <a href="/admin">Admin</a>
+      <a href="/admin">Gallery</a>
       <a href="/admin/characters/new">Character creator</a>
     </nav>
   </div>
@@ -91,6 +91,74 @@
     <p class="muted" id="selInfo">Nothing selected — sending will use every item in this tab.</p>
     <div class="grid" id="grid"></div>
   </div>
+
+  <section class="seo">
+    <h2>How to download images and videos from a Twitter/X account</h2>
+    <p>
+      Paste a username, an <code>@handle</code>, or a full profile URL such as
+      <code>https://x.com/nasa</code> into the box above and press <b>Scan</b>.
+      The scanner walks that account's media timeline and lists everything it
+      posted — every photo and every video — so you can look through it all on
+      one page instead of scrolling the timeline. Nothing is uploaded anywhere:
+      the files stream from X straight to your machine.
+    </p>
+
+    <h3>What you can do with the results</h3>
+    <dl class="seo-list">
+      <dt>Download the images</dt>
+      <dd>
+        Images land in their own tab as thumbnails with the date and the tweet
+        text. Each one has a download button that saves the full-size original,
+        not the compressed preview, and a link back to the tweet it came from.
+      </dd>
+
+      <dt>Download the videos</dt>
+      <dd>
+        Videos get a separate tab, each with the still frame X generated for it
+        and a duration badge. Click to play inline before you commit to
+        downloading, then grab the MP4 at the highest quality available.
+      </dd>
+
+      <dt>Select images and videos</dt>
+      <dd>
+        Tick the items you actually want. Selections work across both tabs at
+        once, so you can mix photos and clips in a single batch, and they
+        survive a page reload — leave and come back without picking again.
+      </dd>
+
+      <dt>Download everything as a ZIP file</dt>
+      <dd>
+        <b>Download tab as ZIP</b> bundles the whole tab into one archive so you
+        don't click through items one at a time. The ZIP streams as it builds,
+        which keeps large accounts from timing out.
+      </dd>
+
+      <dt>Download everything from an account</dt>
+      <dd>
+        Raise the scan limit to sweep up to 1000 media items in one pass, then
+        ZIP each tab to take the account's full media history in two downloads.
+      </dd>
+    </dl>
+
+    <h3>Turn what you downloaded into a character</h3>
+    <p>
+      Anything you select can go straight to a character in your
+      <a href="/admin">gallery</a> instead of your downloads folder — its
+      images, its videos, and a profile you write yourself. From there a
+      character can be published to
+      <a href="{{ brand_url }}" target="_blank" rel="noopener">{{ brand_name }}</a>,
+      where you can chat with it.
+    </p>
+
+    <h3>Why does it ask for login cookies?</h3>
+    <p>
+      X/Twitter stopped serving media timelines to logged-out visitors, so a
+      scan has to be made as a signed-in user. Paste the cookies from your own
+      x.com session into the <b>Login cookies</b> box. They stay in your
+      browser's local storage, are sent only to run your scan, and are never
+      shared with anyone else.
+    </p>
+  </section>
 </div>
 
 <div class="backdrop" id="sendModal" hidden>
