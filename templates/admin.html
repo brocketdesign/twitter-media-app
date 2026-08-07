@@ -143,6 +143,12 @@
     <p><a href="/admin/characters/new">Create one in the character creator</a>, or scan a timeline and send media straight into a new character.</p>
   </div>
   {% endif %}
+  <footer class="sitefoot">
+    <img src="{{ url_for('static', filename='img/mam-logo.png') }}" alt="" width="28" height="28" loading="lazy">
+    <p>A free tool by
+      <a href="{{ brand_url }}" target="_blank" rel="noopener">{{ brand_name }}</a>,
+      the AI influencer business OS.</p>
+  </footer>
 </div>
 
 <script>

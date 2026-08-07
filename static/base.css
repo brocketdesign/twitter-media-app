@@ -381,3 +381,14 @@ img, video { max-width: 100%; }
 .seo-list dd {
   margin: 6px 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.7;
 }
+
+/* --- site footer --- */
+.sitefoot {
+  margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  flex-wrap: wrap; text-align: center;
+}
+.sitefoot img { border-radius: 6px; flex: none; }
+.sitefoot p { margin: 0; color: var(--muted); font-size: 13px; }
+.sitefoot a { color: var(--accent-soft); text-decoration: none; font-weight: 600; }
+.sitefoot a:hover { text-decoration: underline; }
