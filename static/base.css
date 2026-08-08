@@ -211,6 +211,29 @@ details summary { cursor: pointer; }
   background: rgba(0, 0, 0, .65); border-radius: var(--r-sm); padding: 2px 6px;
 }
 video.thumb { object-fit: contain; }
+
+/* inline player — replaces the .vthumb once a preview is clicked */
+.vplayer { position: relative; background: #000; }
+.vplayer video {
+  width: 100%; height: 100%; aspect-ratio: 1;
+  object-fit: contain; display: block; background: #000;
+}
+.vstate {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 12px; text-align: center;
+  font-size: 12px; color: #fff; background: rgba(0, 0, 0, .6);
+  pointer-events: none;   /* never sits between the user and the controls */
+}
+.vstate.err { pointer-events: auto; color: var(--warn); }
+.vstate-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.vstate-actions button, .vstate-actions a {
+  font-size: 11px; padding: 5px 10px; border-radius: var(--r-sm);
+  text-decoration: none; color: var(--fg);
+  background: var(--glass-strong); border: 1px solid var(--glass-border);
+  box-shadow: none;
+}
+.vstate-actions button:hover, .vstate-actions a:hover { background: var(--accent); transform: none; }
 .meta { padding: 8px 10px; font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; }
 .meta .text { max-height: 3.6em; overflow: hidden; color: var(--dim); }
 .actions { display: flex; gap: 6px; padding: 0 10px 10px; }

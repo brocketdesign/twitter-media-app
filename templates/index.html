@@ -436,7 +436,8 @@ function renderGrid() {
       ? `<img class="thumb" loading="lazy" src="${it.url}" alt="">`
       : `<div class="thumb vthumb" title="Click to play">
            ${it.poster
-             ? `<img class="poster" loading="lazy" src="${escapeHtml(it.poster)}" alt="" onerror="this.remove()">`
+             ? `<img class="poster" loading="lazy" src="${escapeHtml(it.poster)}" alt=""
+                     data-src="${escapeHtml(it.poster)}" onerror="posterFallback(this)">`
              : ''}
            <span class="play">▶</span>
            ${it.duration ? `<span class="dur">${formatDuration(it.duration)}</span>` : ''}
@@ -463,27 +464,104 @@ function renderGrid() {
   }
 }
 
+function posterFallback(img) {
+  // A still frame the CDN refused directly is usually fine through the proxy;
+  // only drop the poster once that has failed too.
+  if (img.dataset.proxied) { img.remove(); return; }
+  img.dataset.proxied = '1';
+  img.src = streamUrl(img.dataset.src);
+}
+
 function formatDuration(secs) {
   const s = Math.max(0, Math.round(secs));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function streamUrl(url) {
+  return `/api/stream?url=${encodeURIComponent(url)}`;
+}
+
 function playVideo(placeholder, item) {
-  // Only one video plays at a time; the rest fall back to their placeholder.
-  document.querySelectorAll('video.thumb').forEach(v => { if (!v.paused) v.pause(); });
+  // Only one video plays at a time.
+  document.querySelectorAll('.vplayer video').forEach(v => { if (!v.paused) v.pause(); });
+
+  const wrap = document.createElement('div');
+  wrap.className = 'thumb vplayer';
   const video = document.createElement('video');
-  video.className = 'thumb';
-  video.src = item.url;
-  if (item.poster) video.poster = item.poster;
   video.controls = true;
-  video.autoplay = true;
   video.playsInline = true;
-  video.preload = 'metadata';
+  video.preload = 'auto';
+  if (item.poster) video.poster = item.poster;
+  const state = document.createElement('div');
+  state.className = 'vstate';
+  state.innerHTML = '<span class="spinner"></span>Loading…';
+  wrap.append(video, state);
+  placeholder.replaceWith(wrap);
+
+  // The proxy comes first: twimg refuses plenty of direct hits from the page,
+  // and a refusal used to swap the player straight back out for the thumbnail,
+  // which read as a blink. The raw URL stays as a second chance in case the
+  // server itself cannot reach the CDN.
+  const sources = [streamUrl(item.url), item.url];
+  let attempt = 0;
+
+  function showLoading(text) {
+    state.className = 'vstate';
+    state.innerHTML = `<span class="spinner"></span>${text}`;
+    state.hidden = false;
+  }
+
+  function ready() {
+    state.hidden = true;
+  }
+
+  function giveUp() {
+    // Stay put and explain, rather than reverting the cell under the cursor.
+    state.className = 'vstate err';
+    state.hidden = false;
+    state.innerHTML = `
+      <div>This video would not play inline.</div>
+      <div class="vstate-actions">
+        <button type="button" data-act="retry">Try again</button>
+        <a href="/api/download?url=${encodeURIComponent(item.url)}&name=${encodeURIComponent(item.filename)}">Download</a>
+        ${item.tweet_url ? `<a href="${item.tweet_url}" target="_blank" rel="noopener">Open tweet</a>` : ''}
+      </div>`;
+    state.querySelector('[data-act=retry]').addEventListener('click', () => {
+      attempt = 0;
+      load();
+    });
+  }
+
+  function load() {
+    video.src = sources[attempt];
+    video.load();
+    // Autoplay with sound is blocked in most browsers; falling back to muted
+    // keeps the click doing something instead of leaving a dead player.
+    const started = video.play();
+    if (started) {
+      started.catch(err => {
+        if (err && err.name === 'NotAllowedError' && !video.muted) {
+          video.muted = true;
+          video.play().catch(() => {});
+        }
+      });
+    }
+  }
+
+  video.addEventListener('loadeddata', ready);
+  video.addEventListener('playing', ready);
   video.addEventListener('error', () => {
-    video.replaceWith(placeholder);
-    setStatus('That video would not play inline — use Download or open the tweet.', 'warn');
+    attempt += 1;
+    if (attempt < sources.length) {
+      showLoading('Retrying…');
+      load();
+    } else {
+      giveUp();
+    }
   });
-  placeholder.replaceWith(video);
+
+  showLoading('Loading…');
+  load();
 }
 
 /* --- send to character --- */
