@@ -11,8 +11,17 @@
 ) }}
 <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
 <style>
-  .cols { display:grid; grid-template-columns:320px 1fr; gap:16px; align-items:start; }
-  @media (max-width:820px) { .cols { grid-template-columns:1fr; } }
+  /* Each column stacks its own cards so the media card sits under the publish
+     card in the main column instead of wrapping back under the profile. The
+     columns stay full height (no align-items:start) so the profile can stick. */
+  .cols { display:grid; grid-template-columns:320px minmax(0,1fr); gap:16px; }
+  .cols > .side, .cols > .main { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  /* The profile is short and the media grid is long, so keep it in view. */
+  .cols > .side > .card { position:sticky; top:16px; }
+  @media (max-width:820px) {
+    .cols { grid-template-columns:1fr; }
+    .cols > .side > .card { position:static; }
+  }
   .drop { border:2px dashed var(--glass-border); border-radius:var(--r-md); padding:24px 16px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; transition:border-color .15s, background .15s; }
   .drop:hover, .drop.over { border-color:var(--accent); background:rgba(130,64,255,.08); }
   .drop b { display:block; color:var(--fg); font-size:14px; margin-bottom:4px; }
@@ -43,82 +52,86 @@
   {{ brand.promo_card('creator') }}
 
   <div class="cols">
-    <div class="card">
-      <h2>Profile</h2>
-      {% if character and character.avatar_media_id %}
-        <img class="avatar-preview" id="avatarPreview" src="" alt="">
-      {% endif %}
-      <label class="field"><span>Name *</span>
-        <input type="text" id="f-name" value="{{ character.name if character else '' }}" placeholder="Character name"></label>
-      <label class="field"><span>Source handle</span>
-        <input type="text" id="f-handle" value="{{ character.handle if character else '' }}" placeholder="x.com handle, e.g. nasa"></label>
-      <label class="field"><span>Description</span>
-        <textarea id="f-description" placeholder="Personality, look, backstory…">{{ character.description if character else '' }}</textarea></label>
-      <label class="field"><span>Tags (comma separated)</span>
-        <input type="text" id="f-tags" value="{{ character.tags if character else '' }}" placeholder="anime, blonde, sci-fi"></label>
-      <div class="row">
-        <button id="saveBtn" onclick="saveProfile()">{% if character %}Save changes{% else %}Create character{% endif %}</button>
-        {% if character %}<button class="danger" onclick="removeCharacter()">Delete</button>{% endif %}
-      </div>
-      <div id="status" class="msg"></div>
-    </div>
-
-    {% if character %}
-    <div class="card" id="publishCard">
-      <div class="toolbar">
-        <h2 style="margin:0">Publish to {{ brand_name }}</h2>
-        <span class="badge off" id="pubBadge">Not published</span>
-      </div>
-      <p class="dim" style="margin:8px 0 0">
-        Creates the character on the remote site and uploads its images and
-        videos. Files already sent are skipped, so you can come back and push
-        new videos to the same character later.
-      </p>
-
-      <div class="pubopts">
-        <label class="check"><input type="checkbox" id="opt-images" checked> Include images</label>
-        <label class="check"><input type="checkbox" id="opt-videos" checked> Include videos</label>
-        <label class="check"><input type="checkbox" id="opt-nsfw"> Mark as NSFW</label>
-        <label class="check"><input type="checkbox" id="opt-visuals">
-          Generate a character sheet + close-up (slower)</label>
-      </div>
-
-      <div class="field" id="attachField">
-        <span>Attach to an existing remote character</span>
-        <input type="hidden" id="f-remote" value="">
-        <input type="search" id="remoteSearch" class="picker-search"
-               placeholder="Search by name, tag or intro…" oninput="renderRemoteChoices()">
-        <div class="picker" id="remoteList"></div>
-      </div>
-
-      <div class="row">
-        <button id="publishBtn" onclick="publishCharacter()">Publish</button>
-        <button class="secondary" onclick="loadRemoteCharacters()" id="refreshRemoteBtn">Refresh list</button>
-        <button class="secondary" id="unlinkBtn" onclick="unlinkRemote()" hidden>Unlink</button>
-      </div>
-      <div id="pubStatus" class="msg"></div>
-      <ul class="pub-log" id="pubLog"></ul>
-    </div>
-    {% endif %}
-
-    <div class="card">
-      <div class="toolbar">
-        <div class="tabs" style="margin:0">
-          <button class="tab active" id="tab-images" onclick="showTab('images')">Images (0)</button>
-          <button class="tab" id="tab-videos" onclick="showTab('videos')">Videos (0)</button>
+    <div class="side">
+      <div class="card">
+        <h2>Profile</h2>
+        {% if character and character.avatar_media_id %}
+          <img class="avatar-preview" id="avatarPreview" src="" alt="">
+        {% endif %}
+        <label class="field"><span>Name *</span>
+          <input type="text" id="f-name" value="{{ character.name if character else '' }}" placeholder="Character name"></label>
+        <label class="field"><span>Source handle</span>
+          <input type="text" id="f-handle" value="{{ character.handle if character else '' }}" placeholder="x.com handle, e.g. nasa"></label>
+        <label class="field"><span>Description</span>
+          <textarea id="f-description" placeholder="Personality, look, backstory…">{{ character.description if character else '' }}</textarea></label>
+        <label class="field"><span>Tags (comma separated)</span>
+          <input type="text" id="f-tags" value="{{ character.tags if character else '' }}" placeholder="anime, blonde, sci-fi"></label>
+        <div class="row">
+          <button id="saveBtn" onclick="saveProfile()">{% if character %}Save changes{% else %}Create character{% endif %}</button>
+          {% if character %}<button class="danger" onclick="removeCharacter()">Delete</button>{% endif %}
         </div>
-        <span class="muted" id="mediaHint"></span>
+        <div id="status" class="msg"></div>
       </div>
+    </div>
 
-      <div class="drop" id="drop" style="margin-top:16px">
-        <b id="dropTitle">Drop images here or click to browse</b>
-        <span id="dropSub">JPG, PNG, GIF, WEBP</span>
+    <div class="main">
+      {% if character %}
+      <div class="card" id="publishCard">
+        <div class="toolbar">
+          <h2 style="margin:0">Publish to {{ brand_name }}</h2>
+          <span class="badge off" id="pubBadge">Not published</span>
+        </div>
+        <p class="dim" style="margin:8px 0 0">
+          Creates the character on the remote site and uploads its images and
+          videos. Files already sent are skipped, so you can come back and push
+          new videos to the same character later.
+        </p>
+
+        <div class="pubopts">
+          <label class="check"><input type="checkbox" id="opt-images" checked> Include images</label>
+          <label class="check"><input type="checkbox" id="opt-videos" checked> Include videos</label>
+          <label class="check"><input type="checkbox" id="opt-nsfw"> Mark as NSFW</label>
+          <label class="check"><input type="checkbox" id="opt-visuals">
+            Generate a character sheet + close-up (slower)</label>
+        </div>
+
+        <div class="field" id="attachField">
+          <span>Attach to an existing remote character</span>
+          <input type="hidden" id="f-remote" value="">
+          <input type="search" id="remoteSearch" class="picker-search"
+                 placeholder="Search by name, tag or intro…" oninput="renderRemoteChoices()">
+          <div class="picker" id="remoteList"></div>
+        </div>
+
+        <div class="row">
+          <button id="publishBtn" onclick="publishCharacter()">Publish</button>
+          <button class="secondary" onclick="loadRemoteCharacters()" id="refreshRemoteBtn">Refresh list</button>
+          <button class="secondary" id="unlinkBtn" onclick="unlinkRemote()" hidden>Unlink</button>
+        </div>
+        <div id="pubStatus" class="msg"></div>
+        <ul class="pub-log" id="pubLog"></ul>
       </div>
-      <input type="file" id="picker" multiple hidden>
-      <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-      <ul class="queue" id="queue"></ul>
+      {% endif %}
 
-      <div class="grid" id="grid" style="margin-top:16px"></div>
+      <div class="card">
+        <div class="toolbar">
+          <div class="tabs" style="margin:0">
+            <button class="tab active" id="tab-images" onclick="showTab('images')">Images (0)</button>
+            <button class="tab" id="tab-videos" onclick="showTab('videos')">Videos (0)</button>
+          </div>
+          <span class="muted" id="mediaHint"></span>
+        </div>
+
+        <div class="drop" id="drop" style="margin-top:16px">
+          <b id="dropTitle">Drop images here or click to browse</b>
+          <span id="dropSub">JPG, PNG, GIF, WEBP</span>
+        </div>
+        <input type="file" id="picker" multiple hidden>
+        <div class="bar" id="bar" hidden><i id="barFill"></i></div>
+        <ul class="queue" id="queue"></ul>
+
+        <div class="grid" id="grid" style="margin-top:16px"></div>
+      </div>
     </div>
   </div>
   <footer class="sitefoot">
