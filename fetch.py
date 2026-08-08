@@ -11,6 +11,10 @@ UA = {
     )
 }
 
+# twimg turns away requests that do not look like they came from a tweet, so
+# every server-side pull carries the same headers a browser on x.com would.
+MEDIA_HEADERS = {**UA, "Referer": "https://x.com/", "Origin": "https://x.com"}
+
 ALLOWED_MEDIA_HOSTS = ("twimg.com",)
 
 
@@ -23,7 +27,7 @@ def fetch_media(url, max_bytes=512 * 1024 * 1024, timeout=60):
     """Download an allowed media URL into memory, bounded by max_bytes."""
     if not is_allowed_media_url(url):
         raise ValueError("URL not allowed")
-    resp = requests.get(url, headers=UA, stream=True, timeout=timeout)
+    resp = requests.get(url, headers=MEDIA_HEADERS, stream=True, timeout=timeout)
     resp.raise_for_status()
     chunks, total = [], 0
     try:

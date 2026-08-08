@@ -20,7 +20,7 @@ from flask import Flask, jsonify, render_template, request, Response, stream_wit
 import publish
 import store
 from admin import bp as admin_bp
-from fetch import UA, is_allowed_media_url
+from fetch import MEDIA_HEADERS, is_allowed_media_url
 
 # Local .env (gitignored) — supplies MYAIMODELMANAGER_API_KEY when the user
 # hasn't typed a key into the admin page. Loaded before anything reads it.
@@ -309,6 +309,82 @@ def _check_media_url(url):
     return is_allowed_media_url(url)
 
 
+# twimg often answers with a generic octet-stream, which stops <video> from
+# even trying; fall back to the extension so the browser knows what it got.
+CONTENT_TYPES = {
+    "mp4": "video/mp4",
+    "m4v": "video/x-m4v",
+    "mov": "video/quicktime",
+    "webm": "video/webm",
+    "m3u8": "application/vnd.apple.mpegurl",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
+
+VAGUE_TYPES = {"", "application/octet-stream", "binary/octet-stream"}
+
+
+def _content_type(url, upstream_type):
+    declared = (upstream_type or "").split(";")[0].strip().lower()
+    if declared not in VAGUE_TYPES:
+        return declared
+    ext = Path(urlparse(url).path).suffix.lstrip(".").lower()
+    return CONTENT_TYPES.get(ext, declared or "application/octet-stream")
+
+
+@app.route("/api/stream", methods=["GET", "HEAD"])
+def stream_media():
+    """Same-origin, range-aware proxy so <video> can preview a remote file.
+
+    Pointing a <video> straight at video.twimg.com fails often enough — the CDN
+    turns away hits that do not look like they came from a tweet — that the
+    preview flashes and dies. Going through the server means the fetch carries
+    the headers twimg expects, and passing Range through in both directions
+    keeps seeking (and Safari, which refuses to play without it) working.
+    """
+    url = request.args.get("url", "")
+    if not _check_media_url(url):
+        return jsonify({"error": "URL not allowed"}), 400
+
+    headers = dict(MEDIA_HEADERS)
+    if request.headers.get("Range"):
+        headers["Range"] = request.headers["Range"]
+
+    try:
+        upstream = requests.get(url, headers=headers, stream=True, timeout=60)
+        upstream.raise_for_status()
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Fetch failed: {exc}"}), 502
+
+    out = {
+        "Content-Type": _content_type(url, upstream.headers.get("Content-Type")),
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, max-age=3600",
+        "Content-Disposition": "inline",
+    }
+    for header in ("Content-Length", "Content-Range"):
+        if upstream.headers.get(header):
+            out[header] = upstream.headers[header]
+
+    # 206 when twimg honoured the Range, 200 when it sent the whole file.
+    status = upstream.status_code
+    if request.method == "HEAD":
+        upstream.close()
+        return Response(status=status, headers=out)
+
+    def gen():
+        try:
+            for chunk in upstream.iter_content(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(stream_with_context(gen()), status=status, headers=out)
+
+
 @app.get("/api/download")
 def download():
     url = request.args.get("url", "")
@@ -316,7 +392,7 @@ def download():
     if not _check_media_url(url):
         return jsonify({"error": "URL not allowed"}), 400
     try:
-        r = requests.get(url, headers=UA, stream=True, timeout=60)
+        r = requests.get(url, headers=MEDIA_HEADERS, stream=True, timeout=60)
         r.raise_for_status()
     except requests.RequestException as exc:
         return jsonify({"error": f"Fetch failed: {exc}"}), 502
@@ -357,7 +433,7 @@ def zip_all():
                 name = "_" + name
             used.add(name)
             try:
-                r = requests.get(url, headers=UA, timeout=60)
+                r = requests.get(url, headers=MEDIA_HEADERS, timeout=60)
                 r.raise_for_status()
                 zf.writestr(name, r.content)
             except requests.RequestException:
