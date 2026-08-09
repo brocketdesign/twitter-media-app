@@ -63,15 +63,33 @@
     <div class="chips" id="history"></div>
     <details id="cookieBox">
       <summary>Login cookies (required by X — click for help) <span id="cookieState" class="muted"></span></summary>
-      <p>X/Twitter blocks anonymous timeline access. Log in to x.com in your browser, then either:</p>
-      <ul>
-        <li>Export cookies with a browser extension ("Get cookies.txt" or a JSON cookie exporter) and paste the whole export here, or</li>
-        <li>Open DevTools → Application → Cookies → x.com, and paste: <code>auth_token=…; ct0=…</code></li>
-      </ul>
-      <textarea id="cookies" placeholder="auth_token=...; ct0=...   (or full cookies.txt / JSON cookie export)"></textarea>
-      <p class="muted">Kept in this browser's local storage and reused on every scan until you change or clear it.
+      <p>X/Twitter blocks anonymous timeline access. Log in to x.com in your browser,
+        open <b>DevTools → Application → Cookies → https://x.com</b>, and copy the value
+        of these two cookies into the boxes. That is all a scan needs.</p>
+      <div class="cookie-grid">
+        <label class="field">
+          <span>auth_token <span class="dim">— your session</span></span>
+          <input id="ck_auth" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="e.g. 75ee6c63e85a1b834c96b8bfacba6cbeb19dfa36">
+        </label>
+        <label class="field">
+          <span>ct0 <span class="dim">— CSRF token, required too</span></span>
+          <input id="ck_ct0" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="e.g. 6903370802d9722140 … f937c09794df4777b50ea534">
+        </label>
+      </div>
+      <p class="muted">Paste just the value — a whole <code>auth_token=…; ct0=…</code>
+        string dropped into either box gets split for you.</p>
+      <div class="row">
+        <button type="button" class="secondary" id="checkCookiesBtn" onclick="checkCookies()">Check cookies</button>
         <button type="button" class="secondary" id="clearCookiesBtn" onclick="clearCookies()">Clear saved cookies</button>
-      </p>
+      </div>
+      <div id="cookieMsg" class="msg"></div>
+      <details id="cookieAdv">
+        <summary>Or paste a whole export (cookies.txt / JSON from a cookie extension)</summary>
+        <textarea id="cookies" placeholder="auth_token=...; ct0=...   (or a full cookies.txt / JSON cookie export)"></textarea>
+      </details>
+      <p class="muted">Kept in this browser's local storage and reused on every scan until you change or clear it.</p>
     </details>
     <div id="status" class="msg"></div>
   </div>
@@ -223,6 +241,11 @@ function lsSet(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* full / disabled */ }
 }
 
+const REQUIRED_COOKIES = ['auth_token', 'ct0'];
+const COOKIE_FIELDS = { auth_token: 'ck_auth', ct0: 'ck_ct0' };
+const X_DOMAINS = ['x.com', 'twitter.com'];
+const NOT_COOKIE_NAMES = new Set(['cookie', 'set-cookie', 'name', 'host', 'domain', 'path']);
+
 function cookieStore(action, value) {
   try {
     if (action === 'get') return localStorage.getItem(COOKIE_KEY) || '';
@@ -232,36 +255,229 @@ function cookieStore(action, value) {
   return '';
 }
 
-function updateCookieState() {
-  const saved = document.getElementById('cookies').value.trim();
-  document.getElementById('cookieState').textContent = saved ? '· saved' : '· not set';
-  document.getElementById('clearCookiesBtn').disabled = !saved;
+/* Reads the same shapes the server does, so the two boxes can be filled from
+   whatever was pasted (or restored from an older save) instead of only from
+   text this page wrote itself. */
+
+function cookieDomainOk(d) {
+  d = (d || '').trim().replace(/^\./, '').toLowerCase();
+  if (!d) return true;  // no domain column: they copied only the x.com rows
+  return X_DOMAINS.some(x => d === x || d.endsWith('.' + x));
 }
 
-function saveCookies() {
-  const val = document.getElementById('cookies').value;
-  if (val.trim()) cookieStore('set', val); else cookieStore('del');
-  updateCookieState();
+function parseCookieText(raw) {
+  raw = (raw || '').trim();
+  if (!raw) return {};
+  let pairs = {};
+  if (raw[0] === '[' || raw[0] === '{') pairs = cookiesFromJson(raw);
+  if (!Object.keys(pairs).length && raw.includes('\t')) pairs = cookiesFromTable(raw);
+  if (!Object.keys(pairs).length) pairs = cookiesFromText(raw);
+  const out = {};
+  for (const [k, v] of Object.entries(pairs)) {
+    if (v && !NOT_COOKIE_NAMES.has(k.toLowerCase())) out[k] = v;
+  }
+  return out;
+}
+
+function cookiesFromJson(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { return {}; }
+  const out = {};
+  if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
+    // A flat {"auth_token": "…", "ct0": "…"} object is as common as an array.
+    if (!('name' in parsed) && Object.values(parsed).every(v => typeof v === 'string')) {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (/^[A-Za-z0-9_.\-]+$/.test(k)) out[k] = v.trim();
+      }
+      return out;
+    }
+    parsed = [parsed];
+  }
+  if (!Array.isArray(parsed)) return {};
+  for (const c of parsed) {
+    if (!c || typeof c !== 'object' || !c.name || c.value == null) continue;
+    if (!cookieDomainOk(c.domain)) continue;
+    out[String(c.name).trim()] = String(c.value).trim();
+  }
+  return out;
+}
+
+function cookiesFromTable(raw) {
+  const out = {};
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const cols = line.split('\t');
+    let domain, name, value;
+    if (cols.length >= 7 && ['TRUE', 'FALSE'].includes(cols[1].trim().toUpperCase())) {
+      [domain, name, value] = [cols[0], cols[5], cols[6]];
+    } else if (cols.length >= 2) {
+      // DevTools' cookie table pastes as Name, Value, Domain, Path, …
+      [domain, name, value] = [cols[2] || '', cols[0], cols[1]];
+    } else continue;
+    name = name.trim();
+    if (!/^[A-Za-z0-9_.\-]+$/.test(name) || !cookieDomainOk(domain)) continue;
+    out[name] = value.trim();
+  }
+  return out;
+}
+
+function cookiesFromText(raw) {
+  const out = {};
+  raw = raw.replace(/^\s*(set-)?cookie\s*:\s*/i, '');
+  for (const chunk of raw.split(/[;\n\r]+/)) {
+    const m = chunk.trim().replace(/,+$/, '').match(/^\s*"?([A-Za-z0-9_.\-]+)"?\s*[=:]\s*"?(.*?)"?\s*$/);
+    if (!m) continue;
+    const value = m[2].trim();
+    if (!value || value.startsWith('//')) continue;  // 'https://x.com' is a URL
+    out[m[1]] = value;
+  }
+  return out;
+}
+
+function serializeCookies(pairs) {
+  return Object.entries(pairs)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+function currentCookies() {
+  return document.getElementById('cookies').value;
+}
+
+function missingCookies(pairs) {
+  return REQUIRED_COOKIES.filter(n => !pairs[n]);
+}
+
+function updateCookieState(pairs) {
+  pairs = pairs || parseCookieText(currentCookies());
+  const names = Object.keys(pairs);
+  const missing = missingCookies(pairs);
+  const state = !names.length ? '· not set'
+    : missing.length ? '· missing ' + missing.join(' + ')
+    : '· saved';
+  document.getElementById('cookieState').textContent = state;
+  document.getElementById('clearCookiesBtn').disabled = !currentCookies().trim();
+  document.getElementById('checkCookiesBtn').disabled = !names.length;
+}
+
+/* The blob in local storage stays the one source of truth. Typing in a box
+   rewrites it (keeping any extra cookies a full export brought along); typing
+   in the export area refills the boxes. */
+
+function writeCookies(pairs, typingIn) {
+  const blob = serializeCookies(pairs);
+  document.getElementById('cookies').value = blob;
+  if (blob) cookieStore('set', blob); else cookieStore('del');
+  fillCookieFields(pairs, typingIn);
+  updateCookieState(pairs);
+}
+
+function fillCookieFields(pairs, typingIn) {
+  for (const [name, id] of Object.entries(COOKIE_FIELDS)) {
+    const el = document.getElementById(id);
+    const want = pairs[name] || '';
+    // Leave the box being typed in alone unless what we read differs from it,
+    // which is how a pasted 'auth_token=…; ct0=…' collapses to bare values.
+    if (name === typingIn && el.value.trim() === want) continue;
+    if (el.value !== want) el.value = want;
+  }
+}
+
+function onCookieField(name) {
+  const el = document.getElementById(COOKIE_FIELDS[name]);
+  const pairs = parseCookieText(currentCookies());
+  const pasted = parseCookieText(el.value);
+  if (Object.keys(pasted).length) Object.assign(pairs, pasted);
+  else pairs[name] = el.value.trim();
+  writeCookies(pairs, name);
+  setCookieMsg('');
+}
+
+function onCookieBlob() {
+  const blob = currentCookies();
+  if (blob.trim()) cookieStore('set', blob); else cookieStore('del');
+  const pairs = parseCookieText(blob);
+  fillCookieFields(pairs, null);
+  updateCookieState(pairs);
+  setCookieMsg('');
 }
 
 function clearCookies() {
-  cookieStore('del');
-  document.getElementById('cookies').value = '';
-  updateCookieState();
-  document.getElementById('cookies').focus();
+  writeCookies({}, null);
+  setCookieMsg('');
+  document.getElementById('ck_auth').focus();
+}
+
+function setCookieMsg(html, cls) {
+  const el = document.getElementById('cookieMsg');
+  el.className = 'msg ' + (cls || '');
+  el.innerHTML = html || '';
+}
+
+function focusCookies(html, cls) {
+  document.getElementById('cookieBox').open = true;
+  if (html) setCookieMsg(html, cls || 'warn');
+}
+
+async function checkCookies() {
+  const btn = document.getElementById('checkCookiesBtn');
+  btn.disabled = true;
+  setCookieMsg('<span class="spinner"></span>Asking X whether this session is still valid…');
+  try {
+    const res = await fetch('/api/cookie-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookies: currentCookies() }),
+    });
+    const body = await res.json();
+    const lines = [escapeHtml(body.message || 'No answer from the check.')];
+    if ((body.names || []).length) {
+      lines.push('<small>Cookies read: ' + escapeHtml(body.names.join(', ')) + '</small>');
+    }
+    (body.warnings || []).forEach(w => lines.push('<small>' + escapeHtml(w) + '</small>'));
+    if (body.detail) lines.push('<small>X said: ' + escapeHtml(body.detail) + '</small>');
+    if (body.gallery_dl) lines.push('<small>gallery-dl ' + escapeHtml(body.gallery_dl) + '</small>');
+    setCookieMsg(lines.join('<br>'), body.ok ? 'ok' : 'err');
+  } catch (e) {
+    setCookieMsg('Could not run the check: ' + escapeHtml(String(e)), 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function initCookies() {
-  const el = document.getElementById('cookies');
-  el.value = cookieStore('get');
-  el.addEventListener('input', saveCookies);
-  el.addEventListener('change', saveCookies);
+  const blob = document.getElementById('cookies');
+  blob.value = cookieStore('get');
+  blob.addEventListener('input', onCookieBlob);
+  blob.addEventListener('change', onCookieBlob);
+  for (const name of Object.keys(COOKIE_FIELDS)) {
+    const el = document.getElementById(COOKIE_FIELDS[name]);
+    el.addEventListener('input', () => onCookieField(name));
+    el.addEventListener('change', () => onCookieField(name));
+  }
   // Another tab changed them — stay in sync instead of overwriting on next save.
   window.addEventListener('storage', e => {
-    if (e.key === COOKIE_KEY) { el.value = e.newValue || ''; updateCookieState(); }
+    if (e.key !== COOKIE_KEY) return;
+    blob.value = e.newValue || '';
+    const pairs = parseCookieText(blob.value);
+    fillCookieFields(pairs, null);
+    updateCookieState(pairs);
   });
-  if (!el.value) document.getElementById('cookieBox').open = true;
-  updateCookieState();
+  const pairs = parseCookieText(blob.value);
+  fillCookieFields(pairs, null);
+  // An older save may hold a format the boxes can show — normalise it so the
+  // two views never disagree about what will be sent.
+  if (blob.value.trim() && Object.keys(pairs).length) writeCookies(pairs, null);
+  if (missingCookies(pairs).length) document.getElementById('cookieBox').open = true;
+  // Text we could not read stays visible in the export area rather than
+  // sitting in storage looking saved while the boxes read empty.
+  if (blob.value.trim() && !Object.keys(pairs).length) {
+    document.getElementById('cookieAdv').open = true;
+    setCookieMsg('Saved cookies could not be read — paste auth_token and ct0 '
+                 + 'into the boxes above.', 'warn');
+  }
+  updateCookieState(pairs);
 }
 
 /* --- last scan + search history (survive refresh and tab navigation) --- */
@@ -345,15 +561,32 @@ async function scan() {
       }),
     });
     const body = await res.json();
-    if (!res.ok) { setStatus(body.error || 'Scan failed.', 'err'); return; }
+    if (!res.ok) {
+      setStatus(escapeHtml(body.error || 'Scan failed.'), 'err');
+      // A bad login is the usual reason, and the fix is two boxes away.
+      if (String(body.code || '').startsWith('cookies')) {
+        focusCookies('Fix these, then hit <b>Check cookies</b> to confirm the '
+                     + 'session before scanning again.', 'warn');
+        document.getElementById('ck_auth').focus();
+      }
+      return;
+    }
     data.images = body.images || [];
     data.videos = body.videos || [];
     selected.images.clear();
     selected.videos.clear();
     document.getElementById('tab-images').textContent = `Images (${data.images.length})`;
     document.getElementById('tab-videos').textContent = `Videos (${data.videos.length})`;
-    if (body.warning) setStatus(body.warning + (body.detail ? '<br><small>' + escapeHtml(body.detail) + '</small>' : ''), 'warn');
-    else setStatus(escapeHtml(body.note || 'Done.'), 'ok');
+    if (body.warning) {
+      const extra = body.detail ? '<br><small>' + escapeHtml(body.detail) + '</small>' : '';
+      setStatus(escapeHtml(body.warning) + extra, 'warn');
+      // Only a login problem is worth reopening the cookie panel for; a
+      // suspended or empty account is not something cookies can fix.
+      if (['auth', 'expired', 'protected'].includes(body.code)) {
+        focusCookies('Hit <b>Check cookies</b> — it asks X directly whether '
+                     + 'this session is still signed in.', 'warn');
+      }
+    } else setStatus(escapeHtml(body.note || 'Done.'), 'ok');
     lastNote = body.note || '';
     document.getElementById('results').style.display = 'block';
     renderGrid();

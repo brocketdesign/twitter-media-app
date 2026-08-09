@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from importlib import metadata
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,6 +20,7 @@ from flask import Flask, jsonify, render_template, request, Response, stream_wit
 
 import publish
 import store
+import xcookies
 from admin import bp as admin_bp
 from fetch import MEDIA_HEADERS, is_allowed_media_url
 
@@ -107,73 +109,94 @@ def parse_username(text):
     return name
 
 
-def build_cookie_file(raw):
-    """Turn user input into a Netscape cookie file.
+def gallery_dl_version():
+    try:
+        return metadata.version("gallery-dl")
+    except metadata.PackageNotFoundError:
+        return ""
 
-    Accepts a full Netscape cookies.txt export, a JSON cookie export
-    (array of {name, value, domain, path, secure, expirationDate, ...}
-    objects, as produced by browser extensions like "Get cookies.txt
-    LOCALLY" or EditThisCookie), or a header-style string like
-    'auth_token=...; ct0=...'.
+
+# Everything gallery-dl can shout at us, mapped to something a user can act
+# on. First match wins, so anything ambiguous sits below the diagnosis it
+# would otherwise steal — a proxy's own "403 Forbidden" is not X refusing a
+# login, and a protected account is not a missing one.
+SCAN_ERRORS = [
+    (r"proxyerror|tunnel connection|max retries|connection (refused|reset|error)"
+     r"|name resolution|failed to resolve|temporary failure",
+     "network",
+     "This server could not reach X at all. That is a connection problem on "
+     "the machine running the scan, not your cookies."),
+    (r"suspended",
+     "suspended",
+     "That account is suspended, so X serves nothing for it."),
+    (r"protected|private profile|not authorized to view",
+     "protected",
+     "That account is protected. Only cookies from an account it has "
+     "approved as a follower can see its media."),
+    (r"\b404\b|notfound|not found|does not exist|no user matches",
+     "no_account",
+     "No such account. Check the handle — X hands names back out after a "
+     "rename, and a deleted account looks the same as a typo."),
+    (r"\b401\b|unauthorized|could not authenticate",
+     "auth",
+     "X rejected the login cookies (401). They have expired — copy a fresh "
+     "auth_token and ct0 from x.com and paste them in again."),
+    (r"\b429\b|rate.?limit|too many requests",
+     "rate_limited",
+     "X is rate-limiting this session (429). Wait about 15 minutes, or scan "
+     "with a lower limit."),
+    (r"login required|authorization.?error|requires? (a )?log",
+     "auth",
+     "gallery-dl says this timeline needs a login. Paste your cookies under "
+     "'Login cookies' — auth_token and ct0 at minimum."),
+    (r"\b403\b|forbidden",
+     "auth",
+     "X refused the request (403). Usually a ct0 that no longer matches "
+     "auth_token, or an account X has locked. 'Check cookies' says which."),
+    (r"timed out|timeout",
+     "network",
+     "The connection to X timed out part-way through. Try again, or scan "
+     "with a lower limit."),
+    (r"unsupported url|no suitable extractor",
+     "internal",
+     "gallery-dl did not recognise the timeline URL."),
+    (r"keyerror|traceback|unable to|unexpected|nonetype|json ?decode",
+     "outdated",
+     "gallery-dl could not read X's response, which is what happens when X "
+     "changes its API and the installed gallery-dl predates the change. "
+     "Updating it (pip install -U gallery-dl) usually fixes this."),
+]
+
+
+def scan_errors(entries):
+    """Pull gallery-dl's own error records out of its --dump-json output.
+
+    They arrive as [-1, {"error": …, "message": …}] entries mixed in with the
+    files, not on stderr — which is why a failed scan used to come back
+    looking like an account with nothing on it.
     """
-    raw = raw.strip()
-    if not raw:
-        return None
-    if raw.startswith("{") or raw.startswith("["):
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            parsed = [parsed]
-        if isinstance(parsed, list) and parsed and all(
-            isinstance(c, dict) and c.get("name") and "value" in c
-            for c in parsed
-        ):
-            lines = ["# Netscape HTTP Cookie File"]
-            for c in parsed:
-                domain = c.get("domain") or ".x.com"
-                include_subdomains = "FALSE" if c.get("hostOnly") else "TRUE"
-                path = c.get("path") or "/"
-                secure = "TRUE" if c.get("secure") else "FALSE"
-                try:
-                    expires = int(float(c.get("expirationDate") or 0))
-                except (TypeError, ValueError):
-                    expires = 0
-                if c.get("session") or expires <= 0:
-                    expires = 2000000000
-                lines.append(
-                    f"{domain}\t{include_subdomains}\t{path}\t{secure}"
-                    f"\t{expires}\t{c['name']}\t{c['value']}"
-                )
-            content = "\n".join(lines) + "\n"
-            return _write_cookie_file(content)
-        # fall through: treat as header-style string
-    if "\t" in raw and ("twitter.com" in raw or "x.com" in raw):
-        content = raw
-    else:
-        pairs = {}
-        for chunk in raw.replace("\n", ";").split(";"):
-            if "=" in chunk:
-                k, v = chunk.split("=", 1)
-                pairs[k.strip()] = v.strip()
-        if not pairs:
-            return None
-        lines = ["# Netscape HTTP Cookie File"]
-        for domain in (".twitter.com", ".x.com"):
-            for k, v in pairs.items():
-                lines.append(f"{domain}\tTRUE\t/\tTRUE\t2000000000\t{k}\t{v}")
-        content = "\n".join(lines) + "\n"
-    return _write_cookie_file(content)
+    out = []
+    for entry in entries:
+        if not (isinstance(entry, list) and entry and entry[0] == -1):
+            continue
+        payload = entry[-1] if isinstance(entry[-1], dict) else {}
+        text = " ".join(
+            str(payload.get(k, "")).strip() for k in ("error", "message")
+        ).strip()
+        if text:
+            out.append(text)
+    return out
 
 
-def _write_cookie_file(content):
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", prefix="twcookies_", delete=False
-    )
-    tmp.write(content)
-    tmp.close()
-    return tmp.name
+def diagnose_scan(text, returncode):
+    """Turn what gallery-dl reported into one sentence worth showing a user."""
+    text = (text or "").lower()
+    for pattern, code, message in SCAN_ERRORS:
+        if re.search(pattern, text):
+            return code, message
+    if returncode:
+        return "failed", f"gallery-dl exited with status {returncode}."
+    return "", ""
 
 
 def classify_entry(entry):
@@ -232,7 +255,15 @@ def scan():
     except (TypeError, ValueError):
         limit = 200
 
-    cookie_path = build_cookie_file(data.get("cookies") or "")
+    raw_cookies = data.get("cookies") or ""
+    pairs = xcookies.parse(raw_cookies)
+    # Bad cookies are the failure mode here, and a scan takes a minute to
+    # discover what one regex can say up front — so say it up front.
+    problem = xcookies.problems(pairs, bool(raw_cookies.strip()))
+    if problem:
+        return jsonify(problem), 400
+
+    cookie_path = xcookies.write_file(pairs)
     timeline_url = f"https://twitter.com/{username}/media"
 
     # Previews are extra files, so ask for headroom above the user's limit and
@@ -243,25 +274,26 @@ def scan():
         "--range", f"1-{min(limit * 2, MAX_SCAN_LIMIT * 2)}",
         "--retries", "3",
         "-o", "previews=true",
+        "--cookies", cookie_path,
+        timeline_url,
     ]
-    if cookie_path:
-        cmd += ["--cookies", cookie_path]
-    cmd.append(timeline_url)
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Scan timed out. Try a lower limit."}), 504
     finally:
-        if cookie_path:
-            Path(cookie_path).unlink(missing_ok=True)
+        Path(cookie_path).unlink(missing_ok=True)
 
-    entries = []
+    entries, unreadable = [], False
     if proc.stdout.strip():
         try:
             entries = json.loads(proc.stdout)
         except json.JSONDecodeError:
-            entries = []
+            unreadable = True
+    if not isinstance(entries, list):
+        entries, unreadable = [], True
+    reported = scan_errors(entries)
 
     items, seen = [], set()
     for entry in entries:
@@ -283,16 +315,32 @@ def scan():
     items = [i for i in items if i["kind"] != "preview"][:limit]
 
     if not items:
-        stderr_tail = (proc.stderr or "").strip().splitlines()[-3:]
-        hint = (
-            "No media found. X/Twitter requires a logged-in session: "
-            "expand 'Login cookies' and paste your cookies "
-            "(at minimum auth_token and ct0 from x.com)."
+        noise = reported + (proc.stderr or "").strip().splitlines()[-4:]
+        code, hint = diagnose_scan(
+            "\n".join(reported) + "\n" + (proc.stderr or ""), proc.returncode
         )
+        if not hint and unreadable:
+            code, hint = "internal", (
+                "gallery-dl returned something this app could not read. Its "
+                "output format may have changed — updating it "
+                "(pip install -U gallery-dl) is the usual fix."
+            )
+        if not hint and entries:
+            code, hint = "empty", (
+                f"@{username} has no images or videos on its media tab — "
+                "the scan reached the account and it is empty."
+            )
+        if not hint:
+            code, hint = "auth", (
+                f"Nothing came back for @{username}. X serves an empty "
+                "timeline rather than an error when a session is stale, so "
+                "check the cookies first — then confirm the handle is right."
+            )
         return jsonify({
             "images": [], "videos": [],
             "warning": hint,
-            "detail": " | ".join(stderr_tail),
+            "code": code,
+            "detail": " | ".join(n for n in noise if n.strip()),
         })
 
     images = [i for i in items if i["kind"] == "image"]
@@ -302,6 +350,36 @@ def scan():
         "videos": videos,
         "username": username,
         "note": f"Scanned @{username} (up to {limit} media items).",
+    })
+
+
+@app.post("/api/cookie-check")
+def cookie_check():
+    """Say whether these cookies are a live X session, before a scan is spent.
+
+    A scan that comes back empty cannot tell an expired login apart from a
+    locked account or a handle that no longer exists. One call to X can.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    raw = data.get("cookies") or ""
+    pairs = xcookies.parse(raw)
+    names = sorted(pairs)
+
+    problem = xcookies.problems(pairs, bool(raw.strip()))
+    if problem:
+        return jsonify({
+            "ok": False,
+            "code": problem["code"],
+            "message": problem["error"],
+            "names": names,
+        })
+
+    result = xcookies.check_session(pairs)
+    return jsonify({
+        **result,
+        "names": names,
+        "warnings": xcookies.shape_warnings(pairs),
+        "gallery_dl": gallery_dl_version(),
     })
 
 

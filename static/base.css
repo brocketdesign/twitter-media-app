@@ -155,6 +155,13 @@ button.danger:hover:not(:disabled) { background: rgba(251, 113, 133, .12); }
 details { margin-top: 10px; color: var(--muted); font-size: 13px; }
 details summary { cursor: pointer; }
 
+/* login cookies — the two values X actually needs, side by side */
+.cookie-grid { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px; }
+.cookie-grid .field { flex: 1 1 260px; margin-bottom: 0; }
+.cookie-grid .field input { min-width: 0; font-family: monospace; font-size: 12px; }
+#cookieMsg small { color: var(--dim); word-break: break-word; }
+#cookieAdv { margin-top: 14px; }
+
 /* messages */
 .msg { margin-top: 12px; font-size: 14px; }
 .msg.warn { color: var(--warn); }

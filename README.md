@@ -16,15 +16,30 @@ A small local web app that lists all media posted by a Twitter/X account — ima
 - Configurable scan limit (up to 1000 media items)
 - Select individual items across **both** tabs (or the whole tab) and **send them to a character**
 - Cookies, the last scan, and a history of searches that landed media are kept in the browser — reload or navigate away without retyping anything
+- **Two-box cookie entry** with a **Check cookies** button that asks X whether the session is still signed in, so a failed scan names its cause instead of guessing
 - **Admin dashboard** at `/admin` — character library with per-character image/video counts and storage
 - **Character creator** — profile fields, avatar picking, drag-and-drop **image and video uploads**
 
 ## Requirements
 
-X/Twitter blocks anonymous timeline access, so you must provide login cookies from a logged-in session on x.com. Either:
+X/Twitter blocks anonymous timeline access, so you must provide login cookies from a logged-in session on x.com. Expand **Login cookies** and fill the two boxes:
 
-- Export cookies with a "Get cookies.txt" browser extension and paste the whole file into the **Login cookies** field in the UI, or
-- Open DevTools → Application → Cookies → x.com and paste `auth_token=…; ct0=…`
+- **auth_token** — the session itself
+- **ct0** — the CSRF token X checks on every call. A scan with only `auth_token` gets refused, which is why both are required up front rather than after a minute of scanning.
+
+Open DevTools → Application → Cookies → `https://x.com` and copy those two values. Paste the value alone; dropping a whole `auth_token=…; ct0=…` string into either box splits it across both.
+
+If you'd rather export the lot, **Or paste a whole export** takes a `cookies.txt` (Netscape) file, a JSON export from a cookie extension, or the block DevTools copies out of its cookie table — with `=` or `:` between name and value. Only cookies scoped to `x.com`/`twitter.com` are kept; the rest of a full-profile export is dropped in the browser and again on the server.
+
+**Check cookies** asks X directly whether the session is still signed in and reports back which of these you're looking at:
+
+| Answer | What it means |
+| --- | --- |
+| Signed in as @you | The login works. An empty scan after this is about the account you scanned, not your login. |
+| 401 | The cookies expired — log in to x.com again and copy fresh ones. Logging out anywhere invalidates them. |
+| 403, error 326 | X has locked the account. Clear the challenge on x.com, then re-copy. |
+| 403, error 64 | The account is suspended. This is the one case that needs a different account. |
+| 429 | Rate limited. The login is fine; wait ~15 minutes. |
 
 Server-side, cookies are written to a temp file, passed to gallery-dl, and deleted after each scan — never stored or logged by the app.
 
@@ -47,7 +62,7 @@ Then open http://127.0.0.1:5001
 ### Scanning a timeline
 
 1. Enter a username or profile URL and optionally adjust the scan limit.
-2. Expand **Login cookies** and paste your cookies (see Requirements). Saved after the first paste.
+2. Expand **Login cookies**, paste `auth_token` and `ct0` (see Requirements), and hit **Check cookies** once to confirm the session. Saved after the first paste.
 3. Click **Scan** — large timelines can take a minute.
 4. Browse the Images/Videos tabs, download items individually, or grab the whole tab as a ZIP.
 5. Click a video to play it inline; the poster and duration come from the tweet itself.
@@ -109,10 +124,20 @@ list — handy when several remote characters share a name.
 - `admin.py` — admin dashboard, character creator, and the `/api/characters/*` endpoints (create/update/delete, `import` for scanned media, `upload` for local files), plus `/media/<char_id>/<file>` for serving stored media.
 - `store.py` — SQLite schema and helpers. The database lives at `data/app.db` and media files under `data/media/<character_id>/`; both are gitignored.
 - `fetch.py` — shared remote-media fetching with the `twimg.com` host allowlist.
+- `xcookies.py` — reads pasted cookies in every shape people paste them, says why a set is unusable before a scan is spent finding out, writes the Netscape file gallery-dl reads, and backs `/api/cookie-check` by asking X's `verify_credentials` whether the session is alive.
 - `publish.py` — the myaimodelmanager client: key resolution (local DB, then `.env`), masking, payload building, and the incremental publish run. Calls `/api/external/create-character`, `/api/external/character/:id/add-image` and `/add-video`.
 - `templates/` + `static/base.css` — dependency-free UI, no build step.
 
 The app is intended to run on localhost and has no authentication — don't expose `/admin` to a network you don't control.
+
+## Troubleshooting a scan that finds nothing
+
+X answers a stale session with an empty timeline rather than an error, so "no media" is rarely about the account. Work down this list:
+
+1. **Hit Check cookies.** It separates an expired login from a locked or suspended account from a scan that failed for some other reason — the one thing an empty result can't tell you.
+2. **Read the grey line under the warning.** gallery-dl reports its failures inside its JSON output rather than on stderr, so an HTTP 401/403/404 from X now shows up there verbatim alongside the plain-English diagnosis.
+3. **Check the handle.** X hands names back out after a rename, so a typo and a deleted account look identical.
+4. **Update gallery-dl** (`pip install -U gallery-dl`) if the diagnosis mentions X changing its API. Scans that used to work and stopped, with no cookie problem behind them, are usually this: X changed a response shape and the pinned version predates the change.
 
 ## Notes
 
