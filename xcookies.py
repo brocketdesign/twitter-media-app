@@ -29,7 +29,20 @@ WEB_BEARER = (
     "1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 )
 
-VERIFY_URL = "https://api.x.com/1.1/account/verify_credentials.json"
+# Tried in order, first straight answer wins. X retires legacy REST paths
+# without warning — the old verify_credentials now answers 404 "that page does
+# not exist" for perfectly good sessions — so a 404 here means the endpoint is
+# gone, never that the cookies are bad. /i/api is what x.com's own web client
+# calls, which makes it the likeliest of the three to outlive the others.
+VERIFY_URLS = (
+    "https://x.com/i/api/1.1/account/settings.json",
+    "https://api.x.com/1.1/account/settings.json",
+    "https://api.x.com/1.1/account/verify_credentials.json",
+)
+
+# Statuses that say something about the session. Anything else (404, 5xx) is
+# the endpoint's problem, not the user's.
+DECISIVE = (200, 401, 403, 429)
 
 # RFC 6265 token characters, minus the ones no real cookie name uses. Kept
 # tight so stray prose in a sloppy paste doesn't register as a cookie.
@@ -219,30 +232,65 @@ def write_file(pairs):
 def check_session(pairs, timeout=20):
     """Ask X whether this session is still logged in.
 
-    One cheap call that separates the three things a failed scan cannot tell
-    apart on its own: cookies that expired, an account X has locked or
-    suspended, and a scan that failed for some reason other than login.
+    One cheap call that separates the things a failed scan cannot tell apart
+    on its own: cookies that expired, an account X has locked or suspended,
+    and a scan that failed for some reason other than login.
+
+    When X will not answer the question — a retired endpoint, a network the
+    server cannot cross — the result is "inconclusive", never a failure. A
+    check that cannot see the session has learned nothing about it, and
+    saying otherwise contradicts scans that are working fine.
     """
     headers = {
         "Authorization": f"Bearer {WEB_BEARER}",
         "x-csrf-token": pairs.get("ct0", ""),
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-active-user": "yes",
+        "x-twitter-client-language": "en",
         "User-Agent": UA["User-Agent"],
         "Accept": "application/json",
+        "Referer": "https://x.com/",
+        "Origin": "https://x.com",
     }
-    jar = {name: value for name, value in pairs.items()}
-    try:
-        resp = requests.get(VERIFY_URL, headers=headers, cookies=jar, timeout=timeout)
-    except requests.RequestException as exc:
-        return {
-            "ok": False,
-            "code": "network",
-            "message": (
-                "Could not reach X to check the session — that is this "
-                "server's connection, not your cookies."
-            ),
-            "detail": str(exc)[:200],
-        }
+    jar = dict(pairs)
+    tried, reached = [], False
+    for url in VERIFY_URLS:
+        try:
+            resp = requests.get(url, headers=headers, cookies=jar, timeout=timeout)
+        except requests.RequestException as exc:
+            tried.append(f"{_host(url)}: {str(exc)[:80]}")
+            continue
+        reached = True
+        if resp.status_code in DECISIVE:
+            return _verdict(resp)
+        tried.append(f"{_host(url)}: HTTP {resp.status_code} {_first_message(resp)}")
+    return {
+        "ok": False,
+        "code": "inconclusive",
+        "message": (
+            "X would not answer the check, so this says nothing about your "
+            "cookies either way — a scan that works is the real proof they "
+            "are fine. X retires these endpoints from time to time; that is "
+            "a fault in the check, not in your login."
+            if reached else
+            "This server could not reach X at all, so the check learned "
+            "nothing about your cookies. That is the network where the app "
+            "runs — if your scans work, they work."
+        ),
+        "detail": " | ".join(tried)[:400],
+    }
 
+
+def _host(url):
+    return url.split("/")[2]
+
+
+def _first_message(resp):
+    _, messages = _api_errors(resp)
+    return messages[0] if messages else ""
+
+
+def _verdict(resp):
     if resp.status_code == 200:
         try:
             me = resp.json()
@@ -301,9 +349,12 @@ def check_session(pairs, timeout=20):
             "ok": False,
             "code": "forbidden",
             "message": (
-                "X refused the session (403). This is usually a ct0 that no "
-                "longer matches auth_token — copy both again in one go, from "
-                "the same browser profile."
+                "X refused the session (403)."
+                + (" The ct0 cookie and the CSRF header do not match (error "
+                   "353)." if 353 in api_codes else "")
+                + " This is usually a ct0 that no longer goes with the "
+                "auth_token — copy both again in one go, from the same "
+                "browser profile."
             ),
             "detail": "; ".join(api_msgs),
         }
@@ -317,10 +368,15 @@ def check_session(pairs, timeout=20):
             ),
             "detail": "; ".join(api_msgs),
         }
+    # Only decisive statuses reach here, so this is belt and braces — and it
+    # still refuses to blame the cookies for an answer it cannot read.
     return {
         "ok": False,
-        "code": "unexpected",
-        "message": f"X answered {resp.status_code} when checking the session.",
+        "code": "inconclusive",
+        "message": (
+            f"X answered {resp.status_code}, which does not say whether the "
+            "session is good. Trust a working scan over this."
+        ),
         "detail": "; ".join(api_msgs) or resp.text[:200],
     }
 

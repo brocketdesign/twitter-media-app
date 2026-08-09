@@ -428,7 +428,12 @@ async function checkCookies() {
     const res = await fetch('/api/cookie-check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookies: currentCookies() }),
+      // The handle is a fallback, not a requirement: when X declines to
+      // answer, the server proves the cookies with a one-item scan instead.
+      body: JSON.stringify({
+        cookies: currentCookies(),
+        username: document.getElementById('username').value,
+      }),
     });
     const body = await res.json();
     const lines = [escapeHtml(body.message || 'No answer from the check.')];
@@ -436,9 +441,12 @@ async function checkCookies() {
       lines.push('<small>Cookies read: ' + escapeHtml(body.names.join(', ')) + '</small>');
     }
     (body.warnings || []).forEach(w => lines.push('<small>' + escapeHtml(w) + '</small>'));
-    if (body.detail) lines.push('<small>X said: ' + escapeHtml(body.detail) + '</small>');
+    if (body.detail) lines.push('<small>' + escapeHtml(body.detail) + '</small>');
     if (body.gallery_dl) lines.push('<small>gallery-dl ' + escapeHtml(body.gallery_dl) + '</small>');
-    setCookieMsg(lines.join('<br>'), body.ok ? 'ok' : 'err');
+    // "Could not tell" is not "failed" — dressing it in red is what makes a
+    // check contradict a scan that is working fine.
+    const tone = body.ok ? 'ok' : (body.code === 'inconclusive' ? 'warn' : 'err');
+    setCookieMsg(lines.join('<br>'), tone);
   } catch (e) {
     setCookieMsg('Could not run the check: ' + escapeHtml(String(e)), 'err');
   } finally {

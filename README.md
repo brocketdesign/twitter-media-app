@@ -39,7 +39,10 @@ If you'd rather export the lot, **Or paste a whole export** takes a `cookies.txt
 | 401 | The cookies expired — log in to x.com again and copy fresh ones. Logging out anywhere invalidates them. |
 | 403, error 326 | X has locked the account. Clear the challenge on x.com, then re-copy. |
 | 403, error 64 | The account is suspended. This is the one case that needs a different account. |
+| 403, error 353 | `ct0` doesn't go with the `auth_token`. Copy both again in one pass, from the same profile. |
 | 429 | Rate limited. The login is fine; wait ~15 minutes. |
+
+X retires its legacy REST endpoints without notice, so the check walks a list of them (`x.com/i/api`, then `api.x.com`) and only a 200/401/403/429 counts as an answer. A 404 means *that endpoint* is gone — never that your cookies are bad. When nothing answers and there's a handle in the search box, the check falls back to pulling one item with gallery-dl and reports what that found, so **the check can't contradict a scan that works**. With no handle to fall back on it says so plainly, in amber rather than red: a check that couldn't see your session has learned nothing about it.
 
 Server-side, cookies are written to a temp file, passed to gallery-dl, and deleted after each scan — never stored or logged by the app.
 
@@ -124,7 +127,7 @@ list — handy when several remote characters share a name.
 - `admin.py` — admin dashboard, character creator, and the `/api/characters/*` endpoints (create/update/delete, `import` for scanned media, `upload` for local files), plus `/media/<char_id>/<file>` for serving stored media.
 - `store.py` — SQLite schema and helpers. The database lives at `data/app.db` and media files under `data/media/<character_id>/`; both are gitignored.
 - `fetch.py` — shared remote-media fetching with the `twimg.com` host allowlist.
-- `xcookies.py` — reads pasted cookies in every shape people paste them, says why a set is unusable before a scan is spent finding out, writes the Netscape file gallery-dl reads, and backs `/api/cookie-check` by asking X's `verify_credentials` whether the session is alive.
+- `xcookies.py` — reads pasted cookies in every shape people paste them, says why a set is unusable before a scan is spent finding out, writes the Netscape file gallery-dl reads, and backs `/api/cookie-check` by asking X whether the session is alive — reporting "inconclusive" rather than a failure whenever X won't answer the question.
 - `publish.py` — the myaimodelmanager client: key resolution (local DB, then `.env`), masking, payload building, and the incremental publish run. Calls `/api/external/create-character`, `/api/external/character/:id/add-image` and `/add-video`.
 - `templates/` + `static/base.css` — dependency-free UI, no build step.
 
@@ -134,7 +137,7 @@ The app is intended to run on localhost and has no authentication — don't expo
 
 X answers a stale session with an empty timeline rather than an error, so "no media" is rarely about the account. Work down this list:
 
-1. **Hit Check cookies.** It separates an expired login from a locked or suspended account from a scan that failed for some other reason — the one thing an empty result can't tell you.
+1. **Hit Check cookies.** It separates an expired login from a locked or suspended account from a scan that failed for some other reason — the one thing an empty result can't tell you. Amber means it couldn't get an answer, not that anything is wrong.
 2. **Read the grey line under the warning.** gallery-dl reports its failures inside its JSON output rather than on stderr, so an HTTP 401/403/404 from X now shows up there verbatim alongside the plain-English diagnosis.
 3. **Check the handle.** X hands names back out after a rename, so a typo and a deleted account look identical.
 4. **Update gallery-dl** (`pip install -U gallery-dl`) if the diagnosis mentions X changing its API. Scans that used to work and stopped, with no cookie problem behind them, are usually this: X changed a response shape and the pinned version predates the change.

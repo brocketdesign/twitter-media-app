@@ -168,6 +168,30 @@ SCAN_ERRORS = [
 ]
 
 
+def run_gallery_dl(cookie_path, username, span, previews=True, timeout=600):
+    cmd = [
+        sys.executable, "-m", "gallery_dl",
+        "--dump-json",
+        "--range", span,
+        "--retries", "3",
+        "-o", f"previews={'true' if previews else 'false'}",
+        "--cookies", cookie_path,
+        f"https://twitter.com/{username}/media",
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def read_entries(stdout):
+    """gallery-dl's --dump-json output, or (None) when it isn't JSON."""
+    if not (stdout or "").strip():
+        return []
+    try:
+        entries = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    return entries if isinstance(entries, list) else None
+
+
 def scan_errors(entries):
     """Pull gallery-dl's own error records out of its --dump-json output.
 
@@ -264,35 +288,19 @@ def scan():
         return jsonify(problem), 400
 
     cookie_path = xcookies.write_file(pairs)
-    timeline_url = f"https://twitter.com/{username}/media"
-
     # Previews are extra files, so ask for headroom above the user's limit and
     # trim back to it once the still frames have been folded into their videos.
-    cmd = [
-        sys.executable, "-m", "gallery_dl",
-        "--dump-json",
-        "--range", f"1-{min(limit * 2, MAX_SCAN_LIMIT * 2)}",
-        "--retries", "3",
-        "-o", "previews=true",
-        "--cookies", cookie_path,
-        timeline_url,
-    ]
-
+    span = f"1-{min(limit * 2, MAX_SCAN_LIMIT * 2)}"
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        proc = run_gallery_dl(cookie_path, username, span)
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Scan timed out. Try a lower limit."}), 504
     finally:
         Path(cookie_path).unlink(missing_ok=True)
 
-    entries, unreadable = [], False
-    if proc.stdout.strip():
-        try:
-            entries = json.loads(proc.stdout)
-        except json.JSONDecodeError:
-            unreadable = True
-    if not isinstance(entries, list):
-        entries, unreadable = [], True
+    entries = read_entries(proc.stdout)
+    unreadable = entries is None
+    entries = entries or []
     reported = scan_errors(entries)
 
     items, seen = [], set()
@@ -353,12 +361,61 @@ def scan():
     })
 
 
+def probe_timeline(pairs, username):
+    """Prove the cookies by pulling one item down the same path a scan uses.
+
+    The authority on whether a login works is the thing that uses it. When
+    X's own API won't answer, this asks gallery-dl for a single item and
+    reports what came back, so the check can never contradict a scan.
+    """
+    cookie_path = xcookies.write_file(pairs)
+    try:
+        proc = run_gallery_dl(cookie_path, username, "1-1", previews=False, timeout=180)
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "code": "inconclusive",
+            "message": "The test scan took too long to answer. Try a real scan.",
+        }
+    finally:
+        Path(cookie_path).unlink(missing_ok=True)
+
+    entries = read_entries(proc.stdout)
+    reported = scan_errors(entries or [])
+    if entries and any(classify_entry(e) for e in entries):
+        return {
+            "ok": True,
+            "code": "ok",
+            "via": "scan",
+            "message": (
+                f"These cookies work — a test scan of @{username} pulled media "
+                "back with them. (X's own status endpoint would not answer, so "
+                "this went down the same path a real scan does.)"
+            ),
+        }
+    code, hint = diagnose_scan(
+        "\n".join(reported) + "\n" + (proc.stderr or ""), proc.returncode
+    )
+    return {
+        "ok": False,
+        "code": code or "inconclusive",
+        "via": "scan",
+        "message": hint or (
+            f"A test scan of @{username} came back empty, which does not by "
+            "itself mean the cookies are bad — that account may simply have "
+            "no media."
+        ),
+        "detail": " | ".join(reported)[:400],
+    }
+
+
 @app.post("/api/cookie-check")
 def cookie_check():
     """Say whether these cookies are a live X session, before a scan is spent.
 
     A scan that comes back empty cannot tell an expired login apart from a
-    locked account or a handle that no longer exists. One call to X can.
+    locked account or a handle that no longer exists. One call to X can —
+    and when X declines to answer, a one-item scan can.
     """
     data = request.get_json(force=True, silent=True) or {}
     raw = data.get("cookies") or ""
@@ -375,6 +432,15 @@ def cookie_check():
         })
 
     result = xcookies.check_session(pairs)
+    username = parse_username(data.get("username") or "")
+    if result.get("code") == "inconclusive" and username:
+        api_detail = result.get("detail", "")
+        result = probe_timeline(pairs, username)
+        # Keep why the direct check bowed out; it is the useful half of a
+        # report that something upstream, not the user, is the problem.
+        result["detail"] = " | ".join(
+            d for d in (result.get("detail"), api_detail) if d
+        )
     return jsonify({
         **result,
         "names": names,
