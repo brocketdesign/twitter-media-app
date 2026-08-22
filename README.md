@@ -128,7 +128,7 @@ list — handy when several remote characters share a name.
 - `store.py` — SQLite schema and helpers. The database lives at `data/app.db` and media files under `data/media/<character_id>/`; both are gitignored.
 - `fetch.py` — shared remote-media fetching with the `twimg.com` host allowlist.
 - `xcookies.py` — reads pasted cookies in every shape people paste them, says why a set is unusable before a scan is spent finding out, writes the Netscape file gallery-dl reads, and backs `/api/cookie-check` by asking X whether the session is alive — reporting "inconclusive" rather than a failure whenever X won't answer the question.
-- `publish.py` — the myaimodelmanager client: key resolution (local DB, then `.env`), masking, payload building, and the incremental publish run. Calls `/api/external/create-character`, `/api/external/character/:id/add-image` and `/add-video`.
+- `publish.py` — the myaimodelmanager client: key resolution (local DB, then `.env`), masking, payload building, and the incremental publish run. Calls `/api/external/create-character`, `/api/external/character/:id/add-image` and `/add-video`. Character creation is a background job on the remote: the POST returns a `jobId`, and the client polls `/api/external/create-character/job/:id` every 5s until it completes (a remote that still answers synchronously is supported too), because the site sits behind Cloudflare and in-request generation gets cut off at ~100s.
 - `templates/` + `static/base.css` — dependency-free UI, no build step.
 
 The app is intended to run on localhost and has no authentication — don't expose `/admin` to a network you don't control.

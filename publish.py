@@ -18,6 +18,7 @@ remote's per-file cap falls back to its original CDN URL when we have one.
 import base64
 import mimetypes
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -41,9 +42,12 @@ MAX_VIDEO_BYTES = 60 * 1024 * 1024
 MAX_PORTRAIT_BYTES = 12 * 1024 * 1024
 
 # Character creation runs vision + persona generation and optionally draws a
-# character sheet, so it is slow by nature.
+# character sheet, so it is slow by nature. On the remote this work happens in
+# a background job (the site sits behind Cloudflare, which cuts origin
+# connections at ~100s), so CREATE_TIMEOUT is a polling budget, not one call.
 CREATE_TIMEOUT = 600
 MEDIA_TIMEOUT = 300
+JOB_POLL_INTERVAL = 5
 
 
 class PublishError(Exception):
@@ -172,9 +176,42 @@ class Client:
     # -- writes --
 
     def create_character(self, payload):
-        return self._call(
+        """Submit a character, then wait out the remote's job pipeline.
+
+        Returns the completed job (or, on a remote that still runs the whole
+        pipeline in-request, its synchronous response). Raises if the job
+        fails or outlives CREATE_TIMEOUT.
+        """
+        result = self._call(
             "POST", "/api/external/create-character", json=payload, timeout=CREATE_TIMEOUT
         )
+        job_id = result.get("jobId") if isinstance(result, dict) else None
+        if not job_id:
+            return result
+
+        path = f"/api/external/create-character/job/{job_id}"
+        deadline = time.monotonic() + CREATE_TIMEOUT
+        while True:
+            job = self._call("GET", path, timeout=30)
+            status = (job.get("status") or "").strip().lower()
+            if status == "completed":
+                # chatId & co. at the top level per the API; a nested
+                # `result` object is accepted in case the remote wraps it.
+                completed = {**(job.get("result") or {}), **job}
+                completed.setdefault("jobId", job_id)
+                return completed
+            if status == "failed":
+                raise PublishError(
+                    f"Character creation failed: {job.get('error') or 'no error given'}"
+                )
+            if time.monotonic() + JOB_POLL_INTERVAL > deadline:
+                raise PublishError(
+                    f"Character creation is still {status or 'running'} after "
+                    f"{CREATE_TIMEOUT // 60} minutes (job {job_id}). It may finish "
+                    "on its own — check the remote before retrying, or you will "
+                    "create a duplicate."
+                )
+            time.sleep(JOB_POLL_INTERVAL)
 
     def add_image(self, chat_id, payload):
         return self._call(
