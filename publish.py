@@ -233,10 +233,54 @@ def _is_http_url(url):
     return urlparse(url or "").scheme in ("http", "https")
 
 
+# Formats the remote's portrait-recreation edit accepts as input. Anything
+# else (AVIF, BMP, HEIC…) is rejected remotely with a vague "couldn't build a
+# character portrait" after a ~30s pipeline run, so it is stopped locally with
+# a message that says what to do instead.
+EDIT_SAFE_IMAGE_MIMES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+# ISO-BMFF brands (AVIF/HEIC): bytes 4:8 are b"ftyp", 8:12 the brand.
+_BOX_BRAND_MIMES = {
+    b"avif": "image/avif", b"avis": "image/avif",
+    b"heic": "image/heic", b"heix": "image/heic", b"heim": "image/heic",
+    b"heis": "image/heic", b"mif1": "image/heic", b"msf1": "image/heic",
+}
+
+
+def sniff_image_mime(data):
+    """The image format the bytes actually are, or None if unrecognised.
+
+    Filenames lie — a `.jpg` downloaded from a CDN can be WebP bytes, and the
+    media files here are stored under content hashes that keep whatever
+    extension the downloader guessed. The remote treats the bytes as ground
+    truth for known formats but can only correct what it recognises, so the
+    label we send should already match.
+    """
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:2] == b"BM":
+        return "image/bmp"
+    if data[4:8] == b"ftyp":
+        return _BOX_BRAND_MIMES.get(data[8:12])
+    return None
+
+
 def data_url(path, fallback_mime="application/octet-stream"):
-    """Read a local file into a `data:` URL the remote can decode."""
-    mime = mimetypes.guess_type(path.name)[0] or fallback_mime
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    """Read a local file into a `data:` URL the remote can decode.
+
+    The MIME comes from the file's magic bytes when they're a known image
+    format; the filename extension and the caller's fallback only fill in for
+    non-images (videos) or unrecognised bytes.
+    """
+    data = path.read_bytes()
+    mime = sniff_image_mime(data) or mimetypes.guess_type(path.name)[0] or fallback_mime
+    encoded = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{encoded}"
 
 
@@ -297,7 +341,15 @@ def character_payload(character, portrait_path=None, nsfw=False, visuals=False):
                 f"(max {MAX_PORTRAIT_BYTES // (1024 * 1024)} MB). Pick a "
                 "smaller image as the avatar."
             )
-        payload["imageUrl"] = data_url(portrait_path, "image/jpeg")
+        with portrait_path.open("rb") as fh:
+            sniffed = sniff_image_mime(fh.read(32))
+        if sniffed and sniffed not in EDIT_SAFE_IMAGE_MIMES:
+            raise PublishError(
+                f"The avatar image format ({sniffed}) isn't one the remote "
+                "can rebuild a character portrait from. Use a JPEG, PNG, "
+                "WebP or GIF image as the avatar."
+            )
+        payload["imageUrl"] = data_url(portrait_path)
     elif description:
         # No image at all: the remote draws the portrait from the description.
         payload["imagePrompt"] = description
