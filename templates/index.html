@@ -101,6 +101,26 @@
         <button class="tab" id="tab-videos" onclick="showTab('videos')">Videos (0)</button>
       </div>
       <div class="row">
+        <div class="viewtoggle" role="group" aria-label="View">
+          <button type="button" id="viewGridBtn" class="active" title="Grid view"
+                  aria-label="Grid view" aria-pressed="true" onclick="showView('grid')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+          </button>
+          <button type="button" id="viewFeedBtn" title="Feed view — autoplaying videos"
+                  aria-label="Feed view" aria-pressed="false" onclick="showView('feed')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="3" width="16" height="8" rx="2"/>
+              <rect x="4" y="14" width="16" height="8" rx="2"/>
+            </svg>
+          </button>
+        </div>
         <button class="secondary" id="selectAllBtn" onclick="toggleSelectAll()">Select all</button>
         <button id="sendBtn" onclick="openSendModal()">Send to character…</button>
         <button class="secondary" id="zipBtn" onclick="downloadZip()">Download tab as ZIP</button>
@@ -108,6 +128,7 @@
     </div>
     <p class="muted" id="selInfo">Nothing selected — sending will use every item in this tab.</p>
     <div class="grid" id="grid"></div>
+    <div class="feed" id="feed" hidden></div>
   </div>
 
   <section class="seo">
@@ -210,6 +231,7 @@
 <script>
 let data = { images: [], videos: [] };
 let currentTab = 'images';
+let currentView = 'grid';
 let lastNote = '';
 const selected = { images: new Set(), videos: new Set() };
 
@@ -495,6 +517,7 @@ function saveScan() {
     username: document.getElementById('username').value,
     limit: document.getElementById('limit').value,
     tab: currentTab,
+    view: currentView,
     note: lastNote,
     images: data.images,
     videos: data.videos,
@@ -518,6 +541,7 @@ function restoreScan() {
   document.getElementById('results').style.display = 'block';
   setStatus(`Showing your last scan${saved.username ? ' of ' + escapeHtml(saved.username) : ''}
              — hit Scan to refresh it.`, '');
+  currentView = saved.view === 'feed' ? 'feed' : 'grid';
   showTab(saved.tab === 'videos' ? 'videos' : 'images');
 }
 
@@ -597,7 +621,7 @@ async function scan() {
     } else setStatus(escapeHtml(body.note || 'Done.'), 'ok');
     lastNote = body.note || '';
     document.getElementById('results').style.display = 'block';
-    renderGrid();
+    render();
     saveScan();
     const found = data.images.length + data.videos.length;
     // Only searches that actually landed media are worth keeping around.
@@ -612,16 +636,45 @@ async function scan() {
 
 function showTab(tab) {
   currentTab = tab;
+  // The feed plays videos, so leaving the video tab drops back to the grid.
+  if (tab !== 'videos') currentView = 'grid';
   document.getElementById('tab-images').classList.toggle('active', tab === 'images');
   document.getElementById('tab-videos').classList.toggle('active', tab === 'videos');
-  renderGrid();
+  render();
   saveScan();
+}
+
+function showView(view) {
+  currentView = view;
+  // Asking for the feed means asking for videos.
+  if (view === 'feed' && currentTab !== 'videos') { showTab('videos'); return; }
+  render();
+  saveScan();
+}
+
+function render() {
+  const isFeed = currentView === 'feed';
+  const wasFeed = !document.getElementById('feed').hidden;
+  for (const [id, on] of [['viewGridBtn', !isFeed], ['viewFeedBtn', isFeed]]) {
+    const btn = document.getElementById(id);
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  document.getElementById('grid').hidden = isFeed;
+  document.getElementById('feed').hidden = !isFeed;
+  if (isFeed) renderFeed(); else renderGrid();
+  // The feed is only worth anything on screen — autoplay keys off the viewport.
+  // Deferred a tick so the videos have their height before the page scrolls.
+  if (isFeed && !wasFeed) {
+    setTimeout(() => document.getElementById('feed').scrollIntoView({ block: 'start' }), 0);
+  }
 }
 
 function togglePick(url, checked) {
   const set = selected[currentTab];
   if (checked) set.add(url); else set.delete(url);
-  document.getElementById('cell-' + hashId(url)).classList.toggle('selected', checked);
+  document.querySelectorAll('#cell-' + hashId(url) + ', #fcell-' + hashId(url))
+    .forEach(el => el.classList.toggle('selected', checked));
   updateSelInfo();
   saveScan();
 }
@@ -637,7 +690,7 @@ function toggleSelectAll() {
   const items = data[currentTab];
   if (set.size === items.length) set.clear();
   else items.forEach(i => set.add(i.url));
-  renderGrid();
+  render();
   saveScan();
 }
 
@@ -662,6 +715,7 @@ function updateSelInfo() {
 }
 
 function renderGrid() {
+  teardownFeed();
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
   const items = data[currentTab];
@@ -702,6 +756,144 @@ function renderGrid() {
     const vthumb = cell.querySelector('.vthumb');
     if (vthumb) vthumb.addEventListener('click', () => playVideo(vthumb, it));
     grid.appendChild(cell);
+  }
+}
+
+/* --- feed view -------------------------------------------------------
+   One video per screen (two per row once there is width for it), playing
+   whatever the viewport is holding and muting everything it is not. Sound
+   is off until a video is clicked, because browsers refuse audible
+   autoplay until the page has been interacted with. */
+
+let feedItems = [];        // { video, badge, item, visible }
+let feedObserver = null;
+let feedSound = false;
+const FEED_VISIBLE = 0.55;  // enough of the video on screen to count as "watching"
+
+function teardownFeed() {
+  if (feedObserver) { feedObserver.disconnect(); feedObserver = null; }
+  for (const entry of feedItems) {
+    entry.dead = true;   // its error handler must not resurrect it
+    entry.visible = false;
+    entry.video.pause();
+    entry.video.removeAttribute('src');
+    entry.video.load();
+  }
+  feedItems = [];
+  document.getElementById('feed').innerHTML = '';
+}
+
+function renderFeed() {
+  teardownFeed();
+  const feed = document.getElementById('feed');
+  const items = data.videos;
+  updateSelInfo();
+  if (!items.length) {
+    feed.innerHTML = '<p class="muted">No videos in this scan.</p>';
+    return;
+  }
+  const set = selected.videos;
+  for (const it of items) {
+    const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
+    const isPicked = set.has(it.url);
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (isPicked ? ' selected' : '');
+    cell.id = 'fcell-' + hashId(it.url);
+    cell.innerHTML = `
+      <input class="pick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
+      <div class="fvideo">
+        <video playsinline loop preload="none" muted
+               ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
+        <span class="fsound"></span>
+      </div>
+      <div class="meta">
+        <div>${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
+        <div class="text">${escapeHtml(it.text)}</div>
+      </div>
+      <div class="actions">
+        <a class="dl" href="${dl}">Download</a>
+        ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
+      </div>`;
+    cell.querySelector('.pick').addEventListener('change', e => togglePick(it.url, e.target.checked));
+
+    const video = cell.querySelector('video');
+    const entry = { video, badge: cell.querySelector('.fsound'), item: it, visible: false };
+    feedItems.push(entry);
+    cell.querySelector('.fvideo').addEventListener('click', () => toggleFeedSound());
+    // Same two-source dance as the grid player: the proxy first, because
+    // twimg turns down plenty of direct hits from the page.
+    video.dataset.attempt = '0';
+    video.addEventListener('error', () => {
+      if (entry.dead) return;
+      const next = Number(video.dataset.attempt) + 1;
+      if (next > 1) return;      // both sources refused — leave the poster up
+      video.dataset.attempt = String(next);
+      video.src = it.url;
+      video.load();
+      if (entry.visible) playFeedVideo(entry);
+    });
+    feed.appendChild(cell);
+  }
+  updateFeedBadges();
+
+  // Watched against the page viewport, not the feed's own scrollport, so a
+  // feed scrolled past on the page stops playing instead of running unseen.
+  feedObserver = new IntersectionObserver(onFeedScroll, { threshold: [0, FEED_VISIBLE] });
+  for (const entry of feedItems) feedObserver.observe(entry.video);
+}
+
+function onFeedScroll(entries) {
+  for (const rec of entries) {
+    const entry = feedItems.find(e => e.video === rec.target);
+    if (!entry) continue;
+    entry.visible = rec.intersectionRatio >= FEED_VISIBLE;
+    if (entry.visible) playFeedVideo(entry);
+    else pauseFeedVideo(entry);
+  }
+  updateFeedBadges();
+}
+
+function playFeedVideo(entry) {
+  const video = entry.video;
+  if (!video.src) {
+    video.src = streamUrl(entry.item.url);
+    video.load();
+  }
+  video.muted = !feedSound;
+  const started = video.play();
+  if (started) {
+    started.catch(err => {
+      // Audible playback the browser will not allow yet: fall back to muted
+      // rather than leaving a still frame sitting there.
+      if (err && err.name === 'NotAllowedError' && !video.muted) {
+        feedSound = false;
+        video.muted = true;
+        updateFeedBadges();
+        video.play().catch(() => {});
+      }
+    });
+  }
+}
+
+function pauseFeedVideo(entry) {
+  entry.video.pause();
+  entry.video.muted = true;   // nothing off screen is ever allowed to be heard
+}
+
+function toggleFeedSound() {
+  feedSound = !feedSound;
+  for (const entry of feedItems) {
+    if (entry.visible) playFeedVideo(entry);
+    else pauseFeedVideo(entry);
+  }
+  updateFeedBadges();
+}
+
+function updateFeedBadges() {
+  for (const entry of feedItems) {
+    entry.badge.textContent = !feedSound ? '🔇 Tap for sound'
+      : entry.visible ? '🔊 Sound on'
+      : '🔇 Muted — off screen';
   }
 }
 

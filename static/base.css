@@ -254,6 +254,42 @@ video.thumb { object-fit: contain; }
 .actions a.dl { background: var(--brand-grad); border-color: transparent; color: #fff; }
 .pick { position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; z-index: 1; }
 
+/* view toggle — grid vs feed */
+.viewtoggle { display: inline-flex; gap: 4px; padding: 3px; border-radius: var(--r-pill);
+  background: var(--glass); border: 1px solid var(--glass-border); }
+.viewtoggle button {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0; border: 0; border-radius: var(--r-pill);
+  background: transparent; color: var(--muted); cursor: pointer; box-shadow: none;
+}
+.viewtoggle button:hover:not(.active) { background: var(--glass-strong); color: var(--fg); transform: none; }
+.viewtoggle button.active { background: var(--brand-grad); color: #fff; box-shadow: var(--brand-glow); }
+.viewtoggle svg { width: 17px; height: 17px; display: block; }
+
+/* video feed — one item per screen on phones, two columns when there is room.
+   The feed is its own scroller so each item can snap into place. */
+.feed {
+  display: grid; grid-template-columns: 1fr; gap: 16px;
+  max-height: calc(100dvh - 120px); overflow-y: auto; overscroll-behavior: contain;
+  scroll-snap-type: y mandatory; padding: 2px; margin: 0 -2px;
+}
+@media (min-width: 860px) { .feed { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.feed .cell { scroll-snap-align: center; }
+.fvideo { position: relative; background: #000; cursor: pointer; }
+.fvideo video {
+  display: block; width: 100%; max-height: calc(100dvh - 260px);
+  aspect-ratio: 9 / 16; object-fit: contain; background: #000;
+}
+@media (min-width: 860px) { .fvideo video { max-height: calc(100dvh - 200px); } }
+.fsound {
+  position: absolute; right: 8px; top: 8px; z-index: 1;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; color: #fff; padding: 5px 9px;
+  border-radius: var(--r-pill); border: 1px solid rgba(255, 255, 255, .35);
+  background: rgba(0, 0, 0, .6); backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
 /* badges */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
