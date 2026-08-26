@@ -266,29 +266,63 @@ video.thumb { object-fit: contain; }
 .viewtoggle button.active { background: var(--brand-grad); color: #fff; box-shadow: var(--brand-glow); }
 .viewtoggle svg { width: 17px; height: 17px; display: block; }
 
-/* video feed — one item per screen on phones, two columns when there is room.
-   The feed is its own scroller so each item can snap into place. */
-.feed {
-  display: grid; grid-template-columns: 1fr; gap: 16px;
-  max-height: calc(100dvh - 120px); overflow-y: auto; overscroll-behavior: contain;
-  scroll-snap-type: y mandatory; padding: 2px; margin: 0 -2px;
+/* video feed — a full-screen player over the page, one video per screen
+   (two side by side once there is width for it), swiped with scroll snap. */
+.feedscreen {
+  position: fixed; inset: 0; z-index: 60;
+  background: #000; display: flex; flex-direction: column;
 }
-@media (min-width: 860px) { .feed { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.feed .cell { scroll-snap-align: center; }
-.fvideo { position: relative; background: #000; cursor: pointer; }
-.fvideo video {
-  display: block; width: 100%; max-height: calc(100dvh - 260px);
-  aspect-ratio: 9 / 16; object-fit: contain; background: #000;
+.feedscreen[hidden] { display: none; }   /* flex would otherwise outrank [hidden] */
+body.feed-open { overflow: hidden; }     /* the page behind must not scroll along */
+.feedtrack {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 1fr; grid-auto-rows: 100%;
+  overflow-y: auto; overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
 }
-@media (min-width: 860px) { .fvideo video { max-height: calc(100dvh - 200px); } }
+@media (min-width: 860px) { .feedtrack { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.feedtrack .empty { color: var(--muted); align-self: center; text-align: center; padding: 24px; }
+.fcell { position: relative; height: 100%; overflow: hidden; background: #000; scroll-snap-align: start; }
+.fcell video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+
+/* controls float over the video, out of the way of the exit button */
+.fexit {
+  position: absolute; z-index: 2;
+  top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+  width: 40px; height: 40px; padding: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .35);
+  backdrop-filter: blur(4px); box-shadow: none;
+}
+.fexit:hover { background: rgba(0, 0, 0, .8); transform: none; }
+.fexit svg { width: 20px; height: 20px; display: block; }
 .fsound {
-  position: absolute; right: 8px; top: 8px; z-index: 1;
+  position: absolute; z-index: 1;
+  left: 50%; transform: translateX(-50%);
+  top: calc(14px + env(safe-area-inset-top));
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 600; color: #fff; padding: 5px 9px;
+  font-size: 12px; font-weight: 600; color: #fff; padding: 6px 12px;
   border-radius: var(--r-pill); border: 1px solid rgba(255, 255, 255, .35);
   background: rgba(0, 0, 0, .6); backdrop-filter: blur(4px);
-  pointer-events: none;
+  pointer-events: none; white-space: nowrap;
 }
+.fpick {
+  position: absolute; z-index: 2;
+  top: calc(16px + env(safe-area-inset-top)); left: calc(14px + env(safe-area-inset-left));
+  width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer;
+}
+.finfo {
+  position: absolute; z-index: 1; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 40px 16px calc(18px + env(safe-area-inset-bottom));
+  color: #fff; font-size: 13px;
+  background: linear-gradient(to top, rgba(0, 0, 0, .85), rgba(0, 0, 0, 0));
+}
+.finfo .who { font-weight: 600; }
+.finfo .text { color: rgba(255, 255, 255, .78); max-height: 3.6em; overflow: hidden; }
+.finfo .actions { padding: 0; }
+.finfo .actions a { background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .3); color: #fff; }
+.finfo .actions a.dl { background: var(--brand-grad); border-color: transparent; }
 
 /* badges */
 .badge {

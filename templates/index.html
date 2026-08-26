@@ -128,7 +128,17 @@
     </div>
     <p class="muted" id="selInfo">Nothing selected — sending will use every item in this tab.</p>
     <div class="grid" id="grid"></div>
-    <div class="feed" id="feed" hidden></div>
+  </div>
+
+  <div class="feedscreen" id="feed" hidden aria-label="Video feed">
+    <button type="button" class="fexit" id="feedExit" title="Close the feed (Esc)"
+            aria-label="Close the feed" onclick="showView('grid')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+    <div class="feedtrack" id="feedTrack"></div>
   </div>
 
   <section class="seo">
@@ -654,7 +664,6 @@ function showView(view) {
 
 function render() {
   const isFeed = currentView === 'feed';
-  const wasFeed = !document.getElementById('feed').hidden;
   for (const [id, on] of [['viewGridBtn', !isFeed], ['viewFeedBtn', isFeed]]) {
     const btn = document.getElementById(id);
     btn.classList.toggle('active', on);
@@ -663,11 +672,6 @@ function render() {
   document.getElementById('grid').hidden = isFeed;
   document.getElementById('feed').hidden = !isFeed;
   if (isFeed) renderFeed(); else renderGrid();
-  // The feed is only worth anything on screen — autoplay keys off the viewport.
-  // Deferred a tick so the videos have their height before the page scrolls.
-  if (isFeed && !wasFeed) {
-    setTimeout(() => document.getElementById('feed').scrollIntoView({ block: 'start' }), 0);
-  }
 }
 
 function togglePick(url, checked) {
@@ -760,36 +764,48 @@ function renderGrid() {
 }
 
 /* --- feed view -------------------------------------------------------
-   One video per screen (two per row once there is width for it), playing
-   whatever the viewport is holding and muting everything it is not. Sound
-   is off until a video is clicked, because browsers refuse audible
-   autoplay until the page has been interacted with. */
+   A full-screen player over the page: one video per screen (two side by
+   side once there is width), swiped with scroll snap. Whatever the screen
+   is holding plays; everything else is paused and muted. Sound starts off
+   because browsers refuse audible autoplay until the page has been
+   interacted with — one tap on a video turns it on for the whole feed. */
 
-let feedItems = [];        // { video, badge, item, visible }
-let feedObserver = null;
+let feedItems = [];        // { cell, video, badge, item, visible, dead }
 let feedSound = false;
-const FEED_VISIBLE = 0.55;  // enough of the video on screen to count as "watching"
+let feedTick = 0;
+const FEED_VISIBLE = 0.6;  // share of a video on screen for it to count as watched
+
+function feedTrackEl() { return document.getElementById('feedTrack'); }
 
 function teardownFeed() {
-  if (feedObserver) { feedObserver.disconnect(); feedObserver = null; }
+  const track = feedTrackEl();
+  for (const ev of ['scroll', 'scrollend', 'touchend']) {
+    track.removeEventListener(ev, onFeedScroll);
+  }
+  removeEventListener('resize', onFeedScroll);
+  clearTimeout(feedTick);
+  feedTick = 0;
   for (const entry of feedItems) {
     entry.dead = true;   // its error handler must not resurrect it
     entry.visible = false;
+    entry.video.autoplay = false;
     entry.video.pause();
     entry.video.removeAttribute('src');
     entry.video.load();
   }
   feedItems = [];
-  document.getElementById('feed').innerHTML = '';
+  track.innerHTML = '';
+  document.body.classList.remove('feed-open');
 }
 
 function renderFeed() {
   teardownFeed();
-  const feed = document.getElementById('feed');
+  const track = feedTrackEl();
   const items = data.videos;
   updateSelInfo();
+  document.body.classList.add('feed-open');
   if (!items.length) {
-    feed.innerHTML = '<p class="muted">No videos in this scan.</p>';
+    track.innerHTML = '<p class="empty">No videos in this scan.</p>';
     return;
   }
   const set = selected.videos;
@@ -797,34 +813,36 @@ function renderFeed() {
     const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
     const isPicked = set.has(it.url);
     const cell = document.createElement('div');
-    cell.className = 'cell' + (isPicked ? ' selected' : '');
+    cell.className = 'fcell';
     cell.id = 'fcell-' + hashId(it.url);
     cell.innerHTML = `
-      <input class="pick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
-      <div class="fvideo">
-        <video playsinline loop preload="none" muted
-               ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
-        <span class="fsound"></span>
-      </div>
-      <div class="meta">
-        <div>${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
+      <video playsinline loop muted preload="none"
+             ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
+      <input class="fpick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
+      <span class="fsound"></span>
+      <div class="finfo">
+        <div class="who">${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
         <div class="text">${escapeHtml(it.text)}</div>
-      </div>
-      <div class="actions">
-        <a class="dl" href="${dl}">Download</a>
-        ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
+        <div class="actions">
+          <a class="dl" href="${dl}">Download</a>
+          ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
+        </div>
       </div>`;
-    cell.querySelector('.pick').addEventListener('change', e => togglePick(it.url, e.target.checked));
+    cell.querySelector('.fpick').addEventListener('change', e => togglePick(it.url, e.target.checked));
 
     const video = cell.querySelector('video');
-    const entry = { video, badge: cell.querySelector('.fsound'), item: it, visible: false };
+    const entry = { cell, video, badge: cell.querySelector('.fsound'), item: it, visible: false };
     feedItems.push(entry);
-    cell.querySelector('.fvideo').addEventListener('click', () => toggleFeedSound());
+    // Anywhere but the buttons at the foot: a tap is the sound switch.
+    cell.addEventListener('click', e => {
+      if (e.target.closest('a, input')) return;
+      toggleFeedSound();
+    });
     // Same two-source dance as the grid player: the proxy first, because
     // twimg turns down plenty of direct hits from the page.
     video.dataset.attempt = '0';
     video.addEventListener('error', () => {
-      if (entry.dead) return;
+      if (entry.dead || !video.src) return;
       const next = Number(video.dataset.attempt) + 1;
       if (next > 1) return;      // both sources refused — leave the poster up
       video.dataset.attempt = String(next);
@@ -832,34 +850,68 @@ function renderFeed() {
       video.load();
       if (entry.visible) playFeedVideo(entry);
     });
-    feed.appendChild(cell);
+    // A play() the browser turned down still leaves autoplay armed, so try
+    // again the moment there are frames to show.
+    video.addEventListener('canplay', () => { if (entry.visible) playFeedVideo(entry); });
+    track.appendChild(cell);
   }
-  updateFeedBadges();
 
-  // Watched against the page viewport, not the feed's own scrollport, so a
-  // feed scrolled past on the page stops playing instead of running unseen.
-  feedObserver = new IntersectionObserver(onFeedScroll, { threshold: [0, FEED_VISIBLE] });
-  for (const entry of feedItems) feedObserver.observe(entry.video);
+  // Scroll position, not IntersectionObserver: the track is its own snapping
+  // scroller, and reading rectangles on scroll is what actually keeps up with
+  // a swipe on a phone.
+  for (const ev of ['scroll', 'scrollend', 'touchend']) {
+    track.addEventListener(ev, onFeedScroll, { passive: true });
+  }
+  addEventListener('resize', onFeedScroll);
+  track.scrollTop = 0;
+  updateFeedActive();
 }
 
-function onFeedScroll(entries) {
-  for (const rec of entries) {
-    const entry = feedItems.find(e => e.video === rec.target);
-    if (!entry) continue;
-    entry.visible = rec.intersectionRatio >= FEED_VISIBLE;
-    if (entry.visible) playFeedVideo(entry);
-    else pauseFeedVideo(entry);
+function onFeedScroll() {
+  // A swipe fires scroll events far faster than the videos need swapping, so
+  // the rectangles get read on a timer rather than on every one of them.
+  if (feedTick) return;
+  feedTick = setTimeout(() => { feedTick = 0; updateFeedActive(); }, 60);
+}
+
+function updateFeedActive() {
+  const track = feedTrackEl();
+  if (!feedItems.length || document.getElementById('feed').hidden) return;
+  const view = track.getBoundingClientRect();
+  for (const entry of feedItems) {
+    const box = entry.cell.getBoundingClientRect();
+    const shown = Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top);
+    const visible = box.height > 0 && shown / box.height >= FEED_VISIBLE;
+    if (visible === entry.visible) continue;
+    entry.visible = visible;
+    if (visible) playFeedVideo(entry); else pauseFeedVideo(entry);
   }
+  primeFeedNeighbours();
   updateFeedBadges();
+}
+
+/* The next video down is fetched while this one plays, so a swipe lands on
+   something ready rather than on a black frame. */
+function primeFeedNeighbours() {
+  const last = feedItems.reduce((n, e, i) => (e.visible ? i : n), -1);
+  if (last < 0) return;
+  for (let i = last + 1; i <= last + 2 && i < feedItems.length; i++) loadFeedVideo(feedItems[i]);
+}
+
+function loadFeedVideo(entry) {
+  if (entry.video.src) return;
+  entry.video.preload = 'auto';
+  entry.video.src = streamUrl(entry.item.url);
+  entry.video.load();
 }
 
 function playFeedVideo(entry) {
   const video = entry.video;
-  if (!video.src) {
-    video.src = streamUrl(entry.item.url);
-    video.load();
-  }
+  loadFeedVideo(entry);
   video.muted = !feedSound;
+  // Armed as well as asked: if the browser turns this play() down for want of
+  // data, it starts on its own once the data arrives.
+  video.autoplay = true;
   const started = video.play();
   if (started) {
     started.catch(err => {
@@ -876,6 +928,7 @@ function playFeedVideo(entry) {
 }
 
 function pauseFeedVideo(entry) {
+  entry.video.autoplay = false;
   entry.video.pause();
   entry.video.muted = true;   // nothing off screen is ever allowed to be heard
 }
@@ -1131,7 +1184,9 @@ async function downloadZip() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeSendModal();
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('sendModal').hidden) closeSendModal();
+  else if (currentView === 'feed') showView('grid');
 });
 
 initCookies();
