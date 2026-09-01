@@ -312,6 +312,28 @@ def scan():
     # Previews are extra files, so ask for headroom above the user's limit and
     # trim back to it once the still frames have been folded into their videos.
     span = f"1-{min(limit * 2, MAX_SCAN_LIMIT * 2)}"
+    # TEMP diagnostics — a short verbose pass with retweets/quotes disabled:
+    # gallery-dl then logs one "Skipping … (retweet)" line per repost the
+    # timeline actually returned, which is the ground truth this app cannot
+    # see any other way. Removed once the repost source question is settled.
+    try:
+        probe = subprocess.run(
+            [sys.executable, "-m", "gallery_dl", "--dump-json", "--verbose",
+             "--range", "1-40", "--retries", "1",
+             "-o", "previews=false", "-o", "retweets=false",
+             "--cookies", cookie_path,
+             f"https://twitter.com/{username}/media"],
+            capture_output=True, text=True, timeout=180)
+        _count = lambda tag: sum(
+            1 for ln in (probe.stderr or "").splitlines()
+            if f"({tag})" in ln and "Skipping" in ln)
+        print(f"[probe] @{username} rc={probe.returncode} "
+              f"skips=retweet:{_count('retweet')} quoted:{_count('quoted')} "
+              f"reply:{_count('reply')} ad:{_count('ad')} "
+              f"tail={' | '.join((probe.stderr or '').strip().splitlines()[-4:])}",
+              file=sys.stderr)
+    except Exception as _exc:
+        print(f"[probe] @{username} failed: {_exc}", file=sys.stderr)
     try:
         proc = run_gallery_dl(cookie_path, username, span)
     except subprocess.TimeoutExpired:
