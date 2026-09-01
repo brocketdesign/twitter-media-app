@@ -587,3 +587,21 @@ body:has(#vstrip:not([hidden])) .toTop { bottom: calc(96px + env(safe-area-inset
 .sitefoot p { margin: 0; color: var(--muted); font-size: 13px; }
 .sitefoot a { color: var(--accent-soft); text-decoration: none; font-weight: 600; }
 .sitefoot a:hover { text-decoration: underline; }
+
+/* saved-to-this-machine badge: a green check pinned on the thumbnail, so a
+   rescan shows at a glance what was already downloaded */
+.dlbadge {
+  position: absolute; top: 8px; right: 8px; z-index: 1;
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #10b981; color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .5);
+}
+.dlbadge svg { width: 12px; height: 12px; display: block; }
+.cell.dled:not(.selected) { border-color: rgba(16, 185, 129, .55); }
+.cell.dled .actions a.dl { border-color: rgba(16, 185, 129, .55); }
+/* in the feed it sits beside the select checkbox, clear of the exit button */
+.fdledge {
+  top: calc(16px + env(safe-area-inset-top));
+  left: calc(48px + env(safe-area-inset-left)); right: auto;
+}
