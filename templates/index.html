@@ -130,6 +130,8 @@
     <div class="grid" id="grid"></div>
   </div>
 
+  <div class="vstrip" id="vstrip" hidden aria-label="Video quick jump"></div>
+
   <div class="feedscreen" id="feed" hidden aria-label="Video feed">
     <button type="button" class="fexit" id="feedExit" title="Close the feed (Esc)"
             aria-label="Close the feed" onclick="showView('grid')">
@@ -685,7 +687,7 @@ function render() {
   }
   document.getElementById('grid').hidden = isFeed;
   document.getElementById('feed').hidden = !isFeed;
-  if (isFeed) renderFeed(); else renderGrid();
+  if (isFeed) renderFeed(); else { renderGrid(); renderVstrip(); }
 }
 
 function togglePick(url, checked) {
@@ -744,6 +746,7 @@ function whoLine(it) {
 
 function renderGrid() {
   teardownFeed();
+  playingVideoUrl = '';   // a re-render tears the inline players down with it
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
   const items = data[currentTab];
@@ -785,6 +788,55 @@ function renderGrid() {
     if (vthumb) vthumb.addEventListener('click', () => playVideo(vthumb, it));
     grid.appendChild(cell);
   }
+}
+
+/* --- floating video strip ---------------------------------------------
+   A docked filmstrip of every video in the scan, floating over the grid
+   while the videos tab is in grid view: tap a thumbnail to scroll its
+   cell into view (spotlit for a beat so the eye lands on it), and the
+   video playing inline keeps a lit edge — with a large grid you never
+   lose which one is playing. */
+
+let playingVideoUrl = '';
+
+function renderVstrip() {
+  const strip = document.getElementById('vstrip');
+  const show = currentTab === 'videos' && data.videos.length > 0;
+  strip.hidden = !show;
+  if (!show) { strip.innerHTML = ''; return; }
+  strip.innerHTML = data.videos.map(it => `
+    <button type="button" class="sthumb${it.url === playingVideoUrl ? ' playing' : ''}"
+            data-url="${escapeHtml(it.url)}" title="Jump to this video">
+      ${it.poster
+        ? `<img loading="lazy" src="${escapeHtml(it.poster)}" alt=""
+               data-src="${escapeHtml(it.poster)}" onerror="posterFallback(this)">`
+        : '<span class="noimg">▶</span>'}
+      ${it.duration ? `<span class="sdur">${formatDuration(it.duration)}</span>` : ''}
+    </button>`).join('');
+  strip.querySelectorAll('.sthumb').forEach(btn =>
+    btn.addEventListener('click', () => jumpToVideo(btn.dataset.url)));
+}
+
+function jumpToVideo(url) {
+  const cell = document.getElementById('cell-' + hashId(url));
+  if (!cell) return;
+  cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  cell.classList.add('spotlit');
+  setTimeout(() => cell.classList.remove('spotlit'), 1600);
+}
+
+function markPlayingVideo(url) {
+  playingVideoUrl = url;
+  const strip = document.getElementById('vstrip');
+  strip.querySelectorAll('.sthumb').forEach(btn => {
+    const on = btn.dataset.url === url;
+    btn.classList.toggle('playing', on);
+    // Keep the lit thumbnail in view when the strip is longer than its box.
+    if (on) strip.scrollTo({
+      left: btn.offsetLeft - (strip.clientWidth - btn.offsetWidth) / 2,
+      behavior: 'smooth',
+    });
+  });
 }
 
 /* --- feed view -------------------------------------------------------
@@ -833,6 +885,7 @@ function teardownFeed() {
 
 function renderFeed() {
   teardownFeed();
+  document.getElementById('vstrip').hidden = true;
   const track = feedTrackEl();
   const items = data.videos;
   updateSelInfo();
@@ -1030,6 +1083,7 @@ function playVideo(placeholder, item) {
   state.innerHTML = '<span class="spinner"></span>Loading…';
   wrap.append(video, state);
   placeholder.replaceWith(wrap);
+  markPlayingVideo(item.url);
 
   // The proxy comes first: twimg refuses plenty of direct hits from the page,
   // and a refusal used to swap the player straight back out for the thumbnail,

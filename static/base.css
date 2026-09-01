@@ -241,6 +241,38 @@ video.thumb { object-fit: contain; }
   box-shadow: none;
 }
 .vstate-actions button:hover, .vstate-actions a:hover { background: var(--accent); transform: none; }
+
+/* floating video strip — a docked filmstrip over the grid on the videos
+   tab: tap a thumbnail to scroll that cell into view; the one playing
+   inline keeps a lit edge. */
+.vstrip {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 50;
+  display: flex; gap: 8px; max-width: min(92vw, 860px);
+  padding: 8px; border-radius: var(--r-lg);
+  background: var(--glass-strong); border: 1px solid var(--glass-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  overflow-x: auto; scrollbar-width: thin;
+  backdrop-filter: blur(10px);
+}
+.vstrip[hidden] { display: none; }
+.sthumb {
+  position: relative; flex: 0 0 auto; width: 84px; aspect-ratio: 1;
+  padding: 0; border-radius: var(--r-sm); overflow: hidden; cursor: pointer;
+  border: 2px solid var(--glass-border); background: #000;
+  transition: border-color var(--t-fast), transform var(--t-fast);
+}
+.sthumb:hover { transform: translateY(-2px); border-color: rgba(130, 64, 255, .55); }
+.sthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sthumb .noimg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--dim); }
+.sthumb .sdur {
+  position: absolute; right: 4px; bottom: 4px;
+  font-size: 10px; font-weight: 600; color: #fff;
+  background: rgba(0, 0, 0, .65); border-radius: 4px; padding: 1px 4px;
+}
+.sthumb.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--brand-glow); }
+/* the cell the strip jumped to flashes so the eye lands on it */
+.cell.spotlit { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), var(--brand-glow); }
+
 .meta { padding: 8px 10px; font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; }
 .meta .text { max-height: 3.6em; overflow: hidden; color: var(--dim); }
 /* repost credit — replaces the @user byline on media the account reposted */
