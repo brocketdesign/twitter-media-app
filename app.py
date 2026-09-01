@@ -327,8 +327,23 @@ def scan():
     # gallery-dl's complaints are the only witness to a scan that dies part
     # way through — its stderr never reaches the browser when some items
     # made it out, so keep a tail in the server log for exactly that case.
+    _items, _seen = [], set()
+    for _e in entries:
+        _i = classify_entry(_e)
+        if _i and _i["url"] not in _seen:
+            _seen.add(_i["url"])
+            _items.append(_i)
+    _kinds = {}
+    for _i in _items:
+        _kinds[_i["kind"]] = _kinds.get(_i["kind"], 0) + 1
+    _reposts = sum(1 for _i in _items if _i["reposted_from"])
+    _sample = "; ".join(
+        f"{_i['date']} {_i['user']}{'(RT)' if _i['reposted_from'] else ''}"
+        for _i in _items[:5])
     print(
         f"[scan] @{username} rc={proc.returncode} entries={len(entries)} "
+        f"items={len(_items)} kinds={_kinds} reposts={_reposts} "
+        f"first=[{_sample}] "
         f"stderr_tail={' | '.join((proc.stderr or '').strip().splitlines()[-6:])}",
         file=sys.stderr,
     )
