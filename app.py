@@ -319,6 +319,15 @@ def scan():
     entries = entries or []
     reported = scan_errors(entries)
 
+    # gallery-dl's complaints are the only witness to a scan that dies part
+    # way through — its stderr never reaches the browser when some items
+    # made it out, so keep a tail in the server log for exactly that case.
+    print(
+        f"[scan] @{username} rc={proc.returncode} entries={len(entries)} "
+        f"stderr_tail={' | '.join((proc.stderr or '').strip().splitlines()[-6:])}",
+        file=sys.stderr,
+    )
+
     items, seen = [], set()
     for entry in entries:
         item = classify_entry(entry)
