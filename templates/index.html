@@ -139,6 +139,17 @@
       </svg>
     </button>
     <div class="feedtrack" id="feedTrack"></div>
+    <div class="fprompt" id="feedPrompt" hidden onclick="enableFeedSound()">
+      <div class="fprompt-card">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z"/>
+          <path d="M16.5 8.5a5 5 0 0 1 0 7"/>
+          <path d="M19.5 5.5a9 9 0 0 1 0 13"/>
+        </svg>
+        Tap to activate sound
+      </div>
+    </div>
   </div>
 
   <section class="seo">
@@ -768,9 +779,17 @@ function renderGrid() {
    side once there is width), swiped with scroll snap. Whatever the screen
    is holding plays; everything else is paused and muted. Sound starts off
    because browsers refuse audible autoplay until the page has been
-   interacted with — one tap on a video turns it on for the whole feed. */
+   interacted with, so the feed asks for that one tap up front and then
+   keeps the sound on the video you are watching. */
 
-let feedItems = [];        // { cell, video, badge, item, visible, dead }
+const ICON_DOWNLOAD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>`;
+const ICON_TWEET = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M17.5 3h3l-6.6 7.5L21.7 21h-6l-4.7-6.1L5.6 21h-3l7.1-8.1L2.6 3h6.2l4.2 5.6L17.5 3zm-1.1 16.2h1.7L7.7 4.7H5.9l10.5 14.5z"/></svg>`;
+
+let feedItems = [];        // { cell, video, item, visible, dead }
+let feedPromptDone = false;   // the sound prompt is asked once per feed
 let feedSound = false;
 let feedTick = 0;
 const FEED_VISIBLE = 0.6;  // share of a video on screen for it to count as watched
@@ -795,6 +814,7 @@ function teardownFeed() {
   }
   feedItems = [];
   track.innerHTML = '';
+  document.getElementById('feedPrompt').hidden = true;
   document.body.classList.remove('feed-open');
 }
 
@@ -806,8 +826,10 @@ function renderFeed() {
   document.body.classList.add('feed-open');
   if (!items.length) {
     track.innerHTML = '<p class="empty">No videos in this scan.</p>';
+    updateFeedPrompt();
     return;
   }
+  feedPromptDone = false;
   const set = selected.videos;
   for (const it of items) {
     const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
@@ -819,19 +841,23 @@ function renderFeed() {
       <video playsinline loop muted preload="none"
              ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
       <input class="fpick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
-      <span class="fsound"></span>
       <div class="finfo">
         <div class="who">${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
         <div class="text">${escapeHtml(it.text)}</div>
         <div class="actions">
-          <a class="dl" href="${dl}">Download</a>
-          ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
+          <a class="dl" href="${dl}" title="Download this video" aria-label="Download">
+            ${ICON_DOWNLOAD}<span class="lbl">Download</span>
+          </a>
+          ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener"
+                              title="Open the tweet" aria-label="Open the tweet">
+            ${ICON_TWEET}<span class="lbl">Tweet</span>
+          </a>` : ''}
         </div>
       </div>`;
     cell.querySelector('.fpick').addEventListener('change', e => togglePick(it.url, e.target.checked));
 
     const video = cell.querySelector('video');
-    const entry = { cell, video, badge: cell.querySelector('.fsound'), item: it, visible: false };
+    const entry = { cell, video, item: it, visible: false };
     feedItems.push(entry);
     // Anywhere but the buttons at the foot: a tap is the sound switch.
     cell.addEventListener('click', e => {
@@ -865,6 +891,7 @@ function renderFeed() {
   addEventListener('resize', onFeedScroll);
   track.scrollTop = 0;
   updateFeedActive();
+  updateFeedPrompt();
 }
 
 function onFeedScroll() {
@@ -887,7 +914,6 @@ function updateFeedActive() {
     if (visible) playFeedVideo(entry); else pauseFeedVideo(entry);
   }
   primeFeedNeighbours();
-  updateFeedBadges();
 }
 
 /* The next video down is fetched while this one plays, so a swipe lands on
@@ -920,7 +946,7 @@ function playFeedVideo(entry) {
       if (err && err.name === 'NotAllowedError' && !video.muted) {
         feedSound = false;
         video.muted = true;
-        updateFeedBadges();
+        updateFeedPrompt();
         video.play().catch(() => {});
       }
     });
@@ -934,20 +960,28 @@ function pauseFeedVideo(entry) {
 }
 
 function toggleFeedSound() {
-  feedSound = !feedSound;
+  setFeedSound(!feedSound);
+}
+
+/* The prompt is what turns sound on the first time; after it has been
+   dismissed a tap on the video is the mute switch. */
+function enableFeedSound() {
+  feedPromptDone = true;
+  setFeedSound(true);
+}
+
+function setFeedSound(on) {
+  feedSound = on;
   for (const entry of feedItems) {
     if (entry.visible) playFeedVideo(entry);
     else pauseFeedVideo(entry);
   }
-  updateFeedBadges();
+  updateFeedPrompt();
 }
 
-function updateFeedBadges() {
-  for (const entry of feedItems) {
-    entry.badge.textContent = !feedSound ? '🔇 Tap for sound'
-      : entry.visible ? '🔊 Sound on'
-      : '🔇 Muted — off screen';
-  }
+function updateFeedPrompt() {
+  document.getElementById('feedPrompt').hidden =
+    feedSound || feedPromptDone || !feedItems.length;
 }
 
 function posterFallback(img) {
@@ -1187,6 +1221,28 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!document.getElementById('sendModal').hidden) closeSendModal();
   else if (currentView === 'feed') showView('grid');
+});
+
+/* --- extension handoff --------------------------------------------------
+   The X sidebar button posts the profile being viewed plus that session's
+   login cookies; pick that up on load and whenever this tab comes back to
+   the front, then scan with it — nothing left to set up by hand. */
+async function takeExtensionHandoff() {
+  try {
+    const res = await fetch('/api/extension/handoff');
+    if (!res.ok) return;
+    const body = await res.json();
+    if (!body.pending) return;
+    document.getElementById('username').value = body.username;
+    writeCookies(parseCookieText(body.cookies || ''), null);
+    setStatus('Profile and login received from the X extension — scanning '
+              + '@' + escapeHtml(body.username) + '…', '');
+    scan();
+  } catch (e) { /* app briefly unreachable — the next focus retries */ }
+}
+takeExtensionHandoff();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) takeExtensionHandoff();
 });
 
 initCookies();

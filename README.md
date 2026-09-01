@@ -17,6 +17,7 @@ A small local web app that lists all media posted by a Twitter/X account — ima
 - Select individual items across **both** tabs (or the whole tab) and **send them to a character**
 - Cookies, the last scan, and a history of searches that landed media are kept in the browser — reload or navigate away without retyping anything
 - **Two-box cookie entry** with a **Check cookies** button that asks X whether the session is still signed in, so a failed scan names its cause instead of guessing
+- **Chrome extension** — a *Media Downloader* item in x.com's sidebar sends the profile you're looking at, plus your login cookies, straight to the app and starts the scan; no DevTools, no pasting
 - **Admin dashboard** at `/admin` — character library with per-character image/video counts and storage
 - **Character creator** — profile fields, avatar picking, drag-and-drop **image and video uploads**
 
@@ -61,6 +62,19 @@ python3 -m venv .venv
 Then open http://127.0.0.1:5001
 
 ## Usage
+
+### One click from X — the browser extension
+
+The companion Chrome extension — its own repo, `twitter-media-app-extension` — puts a **Media Downloader** item at the bottom of x.com's left sidebar. Click it and the extension sends the profile on screen — or, anywhere else on X, your own logged-in account — together with that session's `auth_token` and `ct0` to the app. The dashboard opens (or comes to the front), the handle and cookies fill themselves in, and the scan starts. Clicking the extension's toolbar icon on an x.com tab does the same thing.
+
+Install it once:
+
+1. `chrome://extensions` → turn on **Developer mode** (top right).
+2. **Load unpacked** → pick the extension repo's folder.
+
+It talks to the hosted app at `https://twitter-media.myaimodelmanager.com` by default; a local copy works too (any port on `127.0.0.1`/`localhost`), and the address can be changed on the extension's **Options** page. Anywhere other than those two also needs its origin added under `host_permissions` in the extension's `manifest.json`. A small dot on the sidebar item shows whether the app answered its last ping.
+
+The handoff sits in the app's memory only, is handed to the first dashboard tab that asks, and expires after 15 minutes — like everywhere else, cookies are never written to disk or logged.
 
 ### Scanning a timeline
 
@@ -129,6 +143,7 @@ list — handy when several remote characters share a name.
 - `fetch.py` — shared remote-media fetching with the `twimg.com` host allowlist.
 - `xcookies.py` — reads pasted cookies in every shape people paste them, says why a set is unusable before a scan is spent finding out, writes the Netscape file gallery-dl reads, and backs `/api/cookie-check` by asking X whether the session is alive — reporting "inconclusive" rather than a failure whenever X won't answer the question.
 - `publish.py` — the myaimodelmanager client: key resolution (local DB, then `.env`), masking, payload building, and the incremental publish run. Calls `/api/external/create-character`, `/api/external/character/:id/add-image` and `/add-video`. Character creation is a background job on the remote: the POST returns a `jobId`, and the client polls `/api/external/create-character/job/:id` every 5s until it completes (a remote that still answers synchronously is supported too), because the site sits behind Cloudflare and in-request generation gets cut off at ~100s.
+- `twitter-media-app-extension/` (separate repo) — the Chrome extension (Manifest V3): a content script injects the sidebar item on x.com and resolves the profile; the service worker is the only part that reads cookies (`chrome.cookies`, `auth_token` + `ct0` only) and POSTs them to `/api/extension/handoff`, then focuses or opens the dashboard tab.
 - `templates/` + `static/base.css` — dependency-free UI, no build step.
 
 The app is intended to run on localhost and has no authentication — don't expose `/admin` to a network you don't control.

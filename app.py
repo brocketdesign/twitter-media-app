@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from importlib import metadata
 from pathlib import Path
@@ -451,6 +452,60 @@ def cookie_check():
 
 def _check_media_url(url):
     return is_allowed_media_url(url)
+
+
+# --- browser extension handoff ----------------------------------------
+# The Chrome extension posts the profile being viewed plus the signed-in
+# session's cookies, and the dashboard tab picks the pair up and scans with
+# it — no DevTools, no pasting. Like everywhere else in this app, cookies
+# never reach disk or logs: the handoff lives in memory only, is handed out
+# once, and expires on its own. That store is per-process, so the Procfile
+# runs a single gunicorn worker (threads carry the concurrency) — with more
+# than one, the extension's POST and the dashboard's GET can land on
+# different workers and the handoff is lost.
+_HANDOFF_TTL = 15 * 60
+_handoff = {}
+
+
+@app.get("/api/ping")
+def ping():
+    """Liveness probe the extension uses to show app status on x.com."""
+    return jsonify({"ok": True, "app": "twitter-media-app"})
+
+
+@app.post("/api/extension/handoff")
+def extension_handoff():
+    data = request.get_json(force=True, silent=True) or {}
+    username = parse_username(data.get("username") or "")
+    if not username:
+        return jsonify({
+            "error": "No usable profile handle in the request.",
+        }), 400
+
+    raw_cookies = data.get("cookies") or ""
+    pairs = xcookies.parse(raw_cookies)
+    problem = xcookies.problems(pairs, bool(raw_cookies.strip()))
+    if problem:
+        return jsonify(problem), 400
+
+    _handoff.clear()
+    _handoff.update(
+        username=username,
+        cookies=raw_cookies,
+        at=time.time(),
+    )
+    return jsonify({"ok": True, "username": username})
+
+
+@app.get("/api/extension/handoff")
+def extension_handoff_take():
+    """One-shot: the dashboard reads a pending handoff, which consumes it."""
+    if _handoff and time.time() - _handoff["at"] <= _HANDOFF_TTL:
+        payload = dict(_handoff)
+        _handoff.clear()
+        return jsonify({"pending": True, **payload})
+    _handoff.clear()
+    return jsonify({"pending": False})
 
 
 # twimg often answers with a generic octet-stream, which stops <video> from

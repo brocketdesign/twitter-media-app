@@ -10,3 +10,5 @@ data/
 .env
 .env.*
 !.env.example
+# Local agent session state.
+.claude/
