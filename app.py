@@ -351,14 +351,17 @@ def scan():
     for _i in _items:
         _kinds[_i["kind"]] = _kinds.get(_i["kind"], 0) + 1
     _reposts = sum(1 for _i in _items if _i["reposted_from"])
-    _sample = "; ".join(
-        f"{_i['date']} {_i['user']}{'(RT)' if _i['reposted_from'] else ''}"
-        for _i in _items[:5])
+    _bylines = {}
+    for _i in _items:
+        _bylines[_i["user"]] = _bylines.get(_i["user"], 0) + 1
+    _top = sorted(_bylines.items(), key=lambda kv: -kv[1])[:5]
     print(
         f"[scan] @{username} rc={proc.returncode} entries={len(entries)} "
         f"posts_entries={len(posts_entries)} "
+        f"posts_rc={getattr(posts, 'returncode', None)} "
+        f"posts_err={' | '.join((getattr(posts, 'stderr', '') or '').strip().splitlines()[-3:])} "
         f"items={len(_items)} kinds={_kinds} reposts={_reposts} "
-        f"first=[{_sample}] "
+        f"bylines={_top} "
         f"stderr_tail={' | '.join((proc.stderr or '').strip().splitlines()[-6:])}",
         file=sys.stderr,
     )
