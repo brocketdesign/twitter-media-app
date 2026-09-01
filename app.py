@@ -169,23 +169,24 @@ SCAN_ERRORS = [
 ]
 
 
-def run_gallery_dl(cookie_path, username, span, previews=True, timeout=600):
+def run_gallery_dl(cookie_path, username, span, previews=True, path="/media",
+                   timeout=600):
     cmd = [
         sys.executable, "-m", "gallery_dl",
         "--dump-json",
         "--range", span,
         "--retries", "3",
         "-o", f"previews={'true' if previews else 'false'}",
-        # The media tab carries reposts alongside the account's own posts, but
-        # gallery-dl drops them unless asked. "original", not true: in true
-        # mode the retweet wrapper's legacy has no id_str and gallery-dl dies
-        # with a KeyError on the first repost, keeping only what came before
-        # it — a scan that shrinks to a couple of items. Original mode swaps
-        # the wrapper for the original tweet and survives; the app's URL
-        # dedup folds the same media reposted twice.
+        # Reposts are why we walk two timelines: X's UserMedia endpoint
+        # serves an account's own media only — the "from @handle" rows the
+        # media tab shows come from the posts timeline instead. "original"
+        # rather than true because gallery-dl's true mode transforms the
+        # retweet wrapper, whose legacy has no id_str, and dies with a
+        # KeyError on the first repost; original mode swaps in the original
+        # tweet and survives. The app's URL dedup folds repeats.
         "-o", "retweets=original",
         "--cookies", cookie_path,
-        f"https://twitter.com/{username}/media",
+        f"https://twitter.com/{username}{path}",
     ]
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
@@ -312,28 +313,6 @@ def scan():
     # Previews are extra files, so ask for headroom above the user's limit and
     # trim back to it once the still frames have been folded into their videos.
     span = f"1-{min(limit * 2, MAX_SCAN_LIMIT * 2)}"
-    # TEMP diagnostics — a short verbose pass with retweets/quotes disabled:
-    # gallery-dl then logs one "Skipping … (retweet)" line per repost the
-    # timeline actually returned, which is the ground truth this app cannot
-    # see any other way. Removed once the repost source question is settled.
-    try:
-        probe = subprocess.run(
-            [sys.executable, "-m", "gallery_dl", "--dump-json", "--verbose",
-             "--range", "1-40", "--retries", "1",
-             "-o", "previews=false", "-o", "retweets=false",
-             "--cookies", cookie_path,
-             f"https://twitter.com/{username}/media"],
-            capture_output=True, text=True, timeout=180)
-        _count = lambda tag: sum(
-            1 for ln in (probe.stderr or "").splitlines()
-            if f"({tag})" in ln and "Skipping" in ln)
-        print(f"[probe] @{username} rc={probe.returncode} "
-              f"skips=retweet:{_count('retweet')} quoted:{_count('quoted')} "
-              f"reply:{_count('reply')} ad:{_count('ad')} "
-              f"tail={' | '.join((probe.stderr or '').strip().splitlines()[-4:])}",
-              file=sys.stderr)
-    except Exception as _exc:
-        print(f"[probe] @{username} failed: {_exc}", file=sys.stderr)
     try:
         proc = run_gallery_dl(cookie_path, username, span)
     except subprocess.TimeoutExpired:
@@ -341,9 +320,22 @@ def scan():
     finally:
         Path(cookie_path).unlink(missing_ok=True)
 
+    # Second pass down the posts timeline, the only one that carries the
+    # account's reposts. Best effort: a slow or failing pass must never cost
+    # the media-tab results, it just leaves the reposts out.
+    posts = None
+    try:
+        posts = run_gallery_dl(cookie_path, username, span, path="/tweets",
+                               timeout=300)
+    except subprocess.TimeoutExpired:
+        posts = None
+    posts_entries = []
+    if posts is not None:
+        posts_entries = read_entries(posts.stdout) or []
+
     entries = read_entries(proc.stdout)
     unreadable = entries is None
-    entries = entries or []
+    entries = (entries or []) + posts_entries
     reported = scan_errors(entries)
 
     # gallery-dl's complaints are the only witness to a scan that dies part
@@ -364,6 +356,7 @@ def scan():
         for _i in _items[:5])
     print(
         f"[scan] @{username} rc={proc.returncode} entries={len(entries)} "
+        f"posts_entries={len(posts_entries)} "
         f"items={len(_items)} kinds={_kinds} reposts={_reposts} "
         f"first=[{_sample}] "
         f"stderr_tail={' | '.join((proc.stderr or '').strip().splitlines()[-6:])}",
@@ -387,7 +380,12 @@ def scan():
             queue = previews.get(item["tweet_id"])
             if queue:
                 item["poster"] = queue.pop(0)
-    items = [i for i in items if i["kind"] != "preview"][:limit]
+    # The media pass fills the list on its own, so interleave the posts pass's
+    # reposts before the limit is applied — tweet ids are snowflakes, which
+    # makes numeric order chronological — or they could never make the cut.
+    items = [i for i in items if i["kind"] != "preview"]
+    items.sort(key=lambda i: int(i["tweet_id"] or 0), reverse=True)
+    items = items[:limit]
 
     if not items:
         noise = reported + (proc.stderr or "").strip().splitlines()[-4:]
