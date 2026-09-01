@@ -61,6 +61,20 @@ def inject_brand():
     }
 
 
+@app.context_processor
+def inject_static_v():
+    """Append the file's mtime to static URLs so edits ship immediately
+    instead of living behind the browser's cached copy."""
+    def static_v(filename):
+        path = os.path.join(app.root_path, "static", filename)
+        try:
+            v = int(os.stat(path).st_mtime)
+        except OSError:
+            v = 0
+        return f"{url_for('static', filename=filename)}?v={v}"
+    return {"static_v": static_v}
+
+
 @app.get("/robots.txt")
 def robots_txt():
     """Let crawlers have the landing page; keep the private dashboards out."""

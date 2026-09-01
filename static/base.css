@@ -605,3 +605,7 @@ body:has(#vstrip:not([hidden])) .toTop { bottom: calc(96px + env(safe-area-inset
   top: calc(16px + env(safe-area-inset-top));
   left: calc(48px + env(safe-area-inset-left)); right: auto;
 }
+
+/* smaller badge for the 84px tray thumbnails */
+.sthumb .dlbadge { width: 16px; height: 16px; top: 4px; right: 4px; }
+.sthumb .dlbadge svg { width: 9px; height: 9px; }

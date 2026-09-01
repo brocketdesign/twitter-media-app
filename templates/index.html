@@ -9,7 +9,7 @@
   'and download them one by one or as a ZIP.',
   '/'
 ) }}
-<link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+<link rel="stylesheet" href="{{ static_v('base.css') }}">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -321,6 +321,14 @@ function refreshDownloadedMarks() {
         });
     }
   }
+  // The floating tray re-renders on every click, so its thumbnails just get
+  // their badge swapped in place.
+  document.querySelectorAll('.sthumb[data-url]').forEach(btn => {
+    const got = downloaded.has(btn.dataset.url);
+    let badge = btn.querySelector('.dlbadge');
+    if (got && !badge) btn.insertAdjacentHTML('beforeend', `<span class="dlbadge" title="Already downloaded">${ICON_SAVED}</span>`);
+    else if (badge) badge.hidden = !got;
+  });
 }
 
 const REQUIRED_COOKIES = ['auth_token', 'ct0'];
@@ -926,6 +934,7 @@ function showPlayingThumb(item) {
                data-src="${escapeHtml(it.poster)}" onerror="posterFallback(this)">`
         : '<span class="noimg">▶</span>'}
       ${it.duration ? `<span class="sdur">${formatDuration(it.duration)}</span>` : ''}
+      ${downloaded.has(it.url) ? `<span class="dlbadge" title="Already downloaded">${ICON_SAVED}</span>` : ''}
     </button>`).join('');
   strip.hidden = false;
   strip.querySelectorAll('.sthumb').forEach(btn =>

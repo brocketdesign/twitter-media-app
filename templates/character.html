@@ -9,7 +9,7 @@
   ('/admin/characters/' ~ character.id) if character else '/admin/characters/new',
   noindex=True
 ) }}
-<link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+<link rel="stylesheet" href="{{ static_v('base.css') }}">
 <style>
   /* Each column stacks its own cards so the media card sits under the publish
      card in the main column instead of wrapping back under the profile. The
