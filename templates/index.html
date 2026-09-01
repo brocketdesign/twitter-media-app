@@ -290,6 +290,39 @@ function lsSet(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* full / disabled */ }
 }
 
+/* --- downloaded marks ---------------------------------------------------
+   Every URL this browser has saved — one-by-one or inside a ZIP — lands in
+   local storage, so a rescan shows at a glance what you already have. */
+const DOWNLOADED_KEY = 'twmedia.downloaded';
+let downloaded = new Set(lsGet(DOWNLOADED_KEY, []));
+
+const ICON_SAVED = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 12.5l5 5L20 6.5"/></svg>`;
+
+function markDownloaded(urls) {
+  let changed = false;
+  for (const u of urls) if (!downloaded.has(u)) { downloaded.add(u); changed = true; }
+  if (changed) lsSet(DOWNLOADED_KEY, [...downloaded]);
+  refreshDownloadedMarks();
+}
+
+function refreshDownloadedMarks() {
+  // Cells carry the hash of their URL as their id, so a mark is applied
+  // without re-rendering (a re-render would tear down playing videos).
+  for (const tab of ['images', 'videos']) {
+    for (const it of data[tab]) {
+      const got = downloaded.has(it.url);
+      document.querySelectorAll(`#cell-${hashId(it.url)}, #fcell-${hashId(it.url)}`)
+        .forEach(el => {
+          el.classList.toggle('dled', got);
+          const badge = el.querySelector('.dlbadge');
+          if (badge) badge.hidden = !got;
+        });
+    }
+  }
+}
+
 const REQUIRED_COOKIES = ['auth_token', 'ct0'];
 const COOKIE_FIELDS = { auth_token: 'ck_auth', ct0: 'ck_ct0' };
 const X_DOMAINS = ['x.com', 'twitter.com'];
@@ -476,7 +509,20 @@ function focusCookies(html, cls) {
 /* Fill the boxes from the session the Chrome extension picked up. The page
    itself can never read x.com's cookies (auth_token is httpOnly), so this
    rides the same handoff the extension posts after you click its
-   Media Downloader item on x.com. */
+   Media Downloader item on x.com.
+
+   Phones and tablets can never run the extension, so there the button stops
+   pretending: it becomes "Get the Chrome extension" and opens the store. */
+
+const isMobile = matchMedia('(pointer: coarse)').matches
+  || matchMedia('(max-width: 820px)').matches;
+
+function initFillButton() {
+  const btn = document.getElementById('fillCookiesBtn');
+  if (!isMobile) return;
+  btn.textContent = 'Get the Chrome extension';
+  btn.onclick = () => window.open(EXTENSION_STORE_URL, '_blank', 'noopener');
+}
 
 async function fillFromSession() {
   const btn = document.getElementById('fillCookiesBtn');
@@ -835,12 +881,14 @@ function renderGrid() {
     cell.innerHTML = `
       <input class="pick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
       ${thumb}
+      <span class="dlbadge" hidden title="Already downloaded to this machine">${ICON_SAVED}</span>
       <div class="meta">
         <div>${escapeHtml(it.date)} ${whoLine(it)}</div>
         <div class="text">${escapeHtml(it.text)}</div>
       </div>
       <div class="actions">
-        <a class="dl" href="${dl}">Download</a>
+        <a class="dl" href="${dl}" data-url="${escapeHtml(it.url)}"
+           title="${downloaded.has(it.url) ? 'Download again' : 'Download'}">Download</a>
         ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener">Tweet</a>` : ''}
       </div>`;
     cell.querySelector('.pick').addEventListener('change', e => togglePick(it.url, e.target.checked));
@@ -848,6 +896,7 @@ function renderGrid() {
     if (vthumb) vthumb.addEventListener('click', () => playVideo(vthumb, it));
     grid.appendChild(cell);
   }
+  refreshDownloadedMarks();
 }
 
 /* --- floating played-videos tray --------------------------------------
@@ -961,11 +1010,12 @@ function renderFeed() {
       <video playsinline loop muted preload="none"
              ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
       <input class="fpick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
+      <span class="dlbadge fdledge" hidden title="Already downloaded to this machine">${ICON_SAVED}</span>
       <div class="finfo">
         <div class="who">${escapeHtml(it.date)} ${whoLine(it)}</div>
         <div class="text">${escapeHtml(it.text)}</div>
         <div class="actions">
-          <a class="dl" href="${dl}" title="Download this video" aria-label="Download">
+          <a class="dl" href="${dl}" data-url="${escapeHtml(it.url)}" title="Download this video" aria-label="Download">
             ${ICON_DOWNLOAD}<span class="lbl">Download</span>
           </a>
           ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener"
@@ -1012,6 +1062,7 @@ function renderFeed() {
   track.scrollTop = 0;
   updateFeedActive();
   updateFeedPrompt();
+  refreshDownloadedMarks();
 }
 
 function onFeedScroll() {
@@ -1360,6 +1411,8 @@ async function downloadZip() {
       a.download = `${base}${suffix}.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
+      // Everything in the part just saved counts as downloaded from now on.
+      markDownloaded(parts[i].map(it => it.url));
       if (i < parts.length - 1) await new Promise(r => setTimeout(r, 800));
     }
     setStatus(parts.length > 1 ? `Downloaded ${parts.length} ZIPs.` : 'ZIP downloaded.', 'ok');
@@ -1399,15 +1452,24 @@ document.addEventListener('visibilitychange', () => {
 });
 
 initCookies();
+initFillButton();
 renderHistory();
 restoreScan();
 
-// One click on a repost badge scans that profile. Delegated on the
-// containers so it survives every re-render of the cells inside them.
+// One click on a repost badge scans that profile, and one completed download
+// (single or from the grid/feed links) leaves a saved badge on its cell.
+// Both are delegated on the containers so they survive every re-render.
 for (const id of ['grid', 'feedTrack']) {
   document.getElementById(id).addEventListener('click', e => {
     const badge = e.target.closest('.rt[data-handle]');
-    if (badge) scanHandle(badge.dataset.handle);
+    if (badge) { scanHandle(badge.dataset.handle); return; }
+    const dl = e.target.closest('a.dl[data-url]');
+    // The browser still follows the link; this only records that it happened.
+    if (dl && downloaded.has(dl.dataset.url)) {
+      setStatus('Already saved earlier — downloading it again.', '');
+    } else if (dl) {
+      markDownloaded([dl.dataset.url]);
+    }
   });
 }
 
