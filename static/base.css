@@ -243,6 +243,13 @@ video.thumb { object-fit: contain; }
 .vstate-actions button:hover, .vstate-actions a:hover { background: var(--accent); transform: none; }
 .meta { padding: 8px 10px; font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; }
 .meta .text { max-height: 3.6em; overflow: hidden; color: var(--dim); }
+/* repost credit — replaces the @user byline on media the account reposted */
+.rt {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-pill);
+  background: rgba(130, 64, 255, .16); border: 1px solid rgba(130, 64, 255, .35);
+  color: var(--accent-soft); vertical-align: 1px;
+}
 .actions { display: flex; gap: 6px; padding: 0 10px 10px; }
 .actions a, .actions button {
   flex: 1; text-align: center; font-size: 12px; padding: 6px 8px;

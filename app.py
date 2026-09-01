@@ -176,6 +176,9 @@ def run_gallery_dl(cookie_path, username, span, previews=True, timeout=600):
         "--range", span,
         "--retries", "3",
         "-o", f"previews={'true' if previews else 'false'}",
+        # The media tab carries reposts alongside the account's own posts, but
+        # gallery-dl drops them unless asked — they are the "from @handle" rows.
+        "-o", "retweets=true",
         "--cookies", cookie_path,
         f"https://twitter.com/{username}/media",
     ]
@@ -240,6 +243,17 @@ def classify_entry(entry):
     author = meta.get("author") or meta.get("user") or {}
     nick = author.get("nick") or author.get("name") or ""
     tweet_id = meta.get("tweet_id") or meta.get("id")
+    # A repost carries the original tweet's id in retweet_id and its author in
+    # `author`; gallery-dl also prefixes the text "RT @handle: ", which the
+    # reposted_from badge says better, so the prefix goes.
+    reposted_from = ""
+    text = (meta.get("content") or "").strip()
+    if meta.get("retweet_id"):
+        prefix = re.match(r"^RT @(\w+): ?", text)
+        # `author` is the original author on a repost; when no author object
+        # came through, the prefix gallery-dl added to the caption still is.
+        reposted_from = author.get("name") or (prefix.group(1) if prefix else "")
+        text = re.sub(r"^RT @\w+: ?", "", text, count=1)
     filename = meta.get("filename") or f"media_{tweet_id or 'unknown'}"
     filename = re.sub(r"[^\w.\-]", "_", f"{filename}.{ext}")
     date = meta.get("date") or ""
@@ -248,8 +262,9 @@ def classify_entry(entry):
         "url": url,
         "filename": filename,
         "date": str(date)[:10],
-        "text": (meta.get("content") or "").strip(),
+        "text": text,
         "user": nick,
+        "reposted_from": reposted_from,
         "tweet_url": f"https://x.com/i/status/{tweet_id}" if tweet_id else "",
         "tweet_id": str(tweet_id or ""),
         "poster": "",

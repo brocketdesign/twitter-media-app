@@ -157,8 +157,9 @@
     <p>
       Paste a username, an <code>@handle</code>, or a full profile URL such as
       <code>https://x.com/nasa</code> into the box above and press <b>Scan</b>.
-      The scanner walks that account's media timeline and lists everything it
-      posted — every photo and every video — so you can look through it all on
+      The scanner walks that account's media timeline and lists everything on
+      it — every photo and every video, including media the account reposted
+      from others (marked "from @handle") — so you can look through it all on
       one page instead of scrolling the timeline. Nothing is uploaded anywhere:
       the files stream from X straight to your machine.
     </p>
@@ -729,6 +730,16 @@ function updateSelInfo() {
     picks ? 'Download selection as ZIP' : 'Download tab as ZIP';
 }
 
+/* The byline under each item. A repost's badge carries the original @handle —
+   its `user` is that same author's display name, so the two never both show. */
+function whoLine(it) {
+  if (it.reposted_from) {
+    return `<span class="rt" title="Reposted onto this account's media tab">`
+         + `&#8635; from @${escapeHtml(it.reposted_from)}</span>`;
+  }
+  return it.user ? '@' + escapeHtml(it.user) : '';
+}
+
 function renderGrid() {
   teardownFeed();
   const grid = document.getElementById('grid');
@@ -760,7 +771,7 @@ function renderGrid() {
       <input class="pick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
       ${thumb}
       <div class="meta">
-        <div>${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
+        <div>${escapeHtml(it.date)} ${whoLine(it)}</div>
         <div class="text">${escapeHtml(it.text)}</div>
       </div>
       <div class="actions">
@@ -842,7 +853,7 @@ function renderFeed() {
              ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
       <input class="fpick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
       <div class="finfo">
-        <div class="who">${escapeHtml(it.date)} ${it.user ? '@' + escapeHtml(it.user) : ''}</div>
+        <div class="who">${escapeHtml(it.date)} ${whoLine(it)}</div>
         <div class="text">${escapeHtml(it.text)}</div>
         <div class="actions">
           <a class="dl" href="${dl}" title="Download this video" aria-label="Download">
