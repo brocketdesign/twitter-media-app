@@ -275,13 +275,18 @@ video.thumb { object-fit: contain; }
 
 .meta { padding: 8px 10px; font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; }
 .meta .text { max-height: 3.6em; overflow: hidden; color: var(--dim); }
-/* repost credit — replaces the @user byline on media the account reposted */
+/* repost credit — replaces the @user byline on media the account reposted;
+   clicking it scans that profile */
 .rt {
   display: inline-flex; align-items: center;
   font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-pill);
   background: rgba(130, 64, 255, .16); border: 1px solid rgba(130, 64, 255, .35);
   color: var(--accent-soft); vertical-align: 1px;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
+.rt:hover { background: rgba(130, 64, 255, .32); color: #fff; border-color: var(--accent); }
+.rt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .actions { display: flex; gap: 6px; padding: 0 10px 10px; }
 .actions a, .actions button {
   flex: 1; text-align: center; font-size: 12px; padding: 6px 8px;

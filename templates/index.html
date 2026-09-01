@@ -735,13 +735,21 @@ function updateSelInfo() {
 }
 
 /* The byline under each item. A repost's badge carries the original @handle —
-   its `user` is that same author's display name, so the two never both show. */
+   its `user` is that same author's display name, so the two never both show.
+   The badge is also a button: one click scans that profile. */
 function whoLine(it) {
   if (it.reposted_from) {
-    return `<span class="rt" title="Reposted onto this account's media tab">`
-         + `&#8635; from @${escapeHtml(it.reposted_from)}</span>`;
+    const h = escapeHtml(it.reposted_from);
+    return `<span class="rt" role="button" tabindex="0" data-handle="${h}"
+                   title="Scan @${h}'s media">&#8635; from @${h}</span>`;
   }
   return it.user ? '@' + escapeHtml(it.user) : '';
+}
+
+function scanHandle(handle) {
+  document.getElementById('username').value = handle;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  scan();
 }
 
 function renderGrid() {
@@ -921,7 +929,7 @@ function renderFeed() {
     feedItems.push(entry);
     // Anywhere but the buttons at the foot: a tap is the sound switch.
     cell.addEventListener('click', e => {
-      if (e.target.closest('a, input')) return;
+      if (e.target.closest('a, input, .rt')) return;
       toggleFeedSound();
     });
     // Same two-source dance as the grid player: the proxy first, because
@@ -1331,6 +1339,15 @@ document.addEventListener('visibilitychange', () => {
 initCookies();
 renderHistory();
 restoreScan();
+
+// One click on a repost badge scans that profile. Delegated on the
+// containers so it survives every re-render of the cells inside them.
+for (const id of ['grid', 'feedTrack']) {
+  document.getElementById(id).addEventListener('click', e => {
+    const badge = e.target.closest('.rt[data-handle]');
+    if (badge) scanHandle(badge.dataset.handle);
+  });
+}
 
 // Keep the username/limit for the next visit even without a scan.
 ['username', 'limit'].forEach(id =>
