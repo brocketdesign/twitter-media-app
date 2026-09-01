@@ -189,15 +189,17 @@
 
       <dt>Download everything as a ZIP file</dt>
       <dd>
-        <b>Download tab as ZIP</b> bundles the whole tab into one archive so you
+        <b>Download tab as ZIP</b> bundles the whole tab into an archive so you
         don't click through items one at a time. The ZIP streams as it builds,
-        which keeps large accounts from timing out.
+        and when a batch is too big for one archive it is split into numbered
+        parts that download one after another.
       </dd>
 
       <dt>Download everything from an account</dt>
       <dd>
         Raise the scan limit to sweep up to 1000 media items in one pass, then
-        ZIP each tab to take the account's full media history in two downloads.
+        ZIP each tab to take the account's full media history home — large
+        tabs arrive as a series of smaller ZIPs.
       </dd>
     </dl>
 
@@ -1203,24 +1205,46 @@ async function downloadZip() {
   if (!items.length || zipBtn.disabled) return;
   zipBtn.disabled = true;
   const username = document.getElementById('username').value.replace(/\W+/g, '') || 'twitter';
-  setStatus('<span class="spinner"></span>Building ZIP…', '');
+
+  // One big archive times out (and trips the API's 200-item cap) on large
+  // tabs, so the batch is split into parts; videos are heavier, so fewer
+  // of them go into each ZIP.
+  const IMAGES_PER_ZIP = 100;
+  const VIDEOS_PER_ZIP = 50;
+  const parts = [];
+  let part = [], images = 0, videos = 0;
+  for (const it of items) {
+    const full = it.kind === 'video'
+      ? videos >= VIDEOS_PER_ZIP : images >= IMAGES_PER_ZIP;
+    if (full && part.length) { parts.push(part); part = []; images = 0; videos = 0; }
+    part.push(it);
+    if (it.kind === 'video') videos++; else images++;
+  }
+  if (part.length) parts.push(part);
+
+  const base = `${username}_${currentTab}`;
   try {
-    const res = await fetch('/api/zip', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        label: `${username}_${currentTab}`,
-        items: items.map(i => ({ url: i.url, name: i.filename })),
-      }),
-    });
-    if (!res.ok) { setStatus('ZIP failed.', 'err'); return; }
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${username}_${currentTab}.zip`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    setStatus('ZIP downloaded.', 'ok');
+    for (let i = 0; i < parts.length; i++) {
+      const suffix = parts.length > 1 ? `_part${i + 1}of${parts.length}` : '';
+      setStatus(`<span class="spinner"></span>Building ZIP ${i + 1} of ${parts.length}…`, '');
+      const res = await fetch('/api/zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: `${base}${suffix}`,
+          items: parts[i].map(it => ({ url: it.url, name: it.filename })),
+        }),
+      });
+      if (!res.ok) { setStatus(`ZIP ${i + 1} of ${parts.length} failed.`, 'err'); return; }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${base}${suffix}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      if (i < parts.length - 1) await new Promise(r => setTimeout(r, 800));
+    }
+    setStatus(parts.length > 1 ? `Downloaded ${parts.length} ZIPs.` : 'ZIP downloaded.', 'ok');
   } catch (e) {
     setStatus('ZIP failed: ' + e, 'err');
   } finally {
