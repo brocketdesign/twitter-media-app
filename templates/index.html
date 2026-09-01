@@ -1173,9 +1173,7 @@ function playVideo(placeholder, item) {
     });
   }
 
-  function load() {
-    video.src = sources[attempt];
-    video.load();
+  function tryPlay() {
     // Autoplay with sound is blocked in most browsers; falling back to muted
     // keeps the click doing something instead of leaving a dead player.
     const started = video.play();
@@ -1189,7 +1187,19 @@ function playVideo(placeholder, item) {
     }
   }
 
-  video.addEventListener('loadeddata', ready);
+  function load() {
+    video.src = sources[attempt];
+    video.load();
+    // A play() issued before the element has metadata is often rejected with
+    // AbortError (the load interrupts it), so arm it again the moment there
+    // are frames to show if the video is still sitting paused.
+    tryPlay();
+  }
+
+  video.addEventListener('loadeddata', () => {
+    ready();
+    if (video.paused && !video.ended) tryPlay();
+  });
   video.addEventListener('playing', ready);
   video.addEventListener('error', () => {
     attempt += 1;
@@ -1405,5 +1415,6 @@ for (const id of ['grid', 'feedTrack']) {
 ['username', 'limit'].forEach(id =>
   document.getElementById(id).addEventListener('change', saveScan));
 </script>
+{{ brand.back_to_top() }}
 </body>
 </html>
