@@ -1234,18 +1234,32 @@ function playVideo(placeholder, item) {
   }
 
   function tryPlay() {
-    // Autoplay with sound is blocked in most browsers; falling back to muted
-    // keeps the click doing something instead of leaving a dead player.
+    // Start muted: browsers always allow muted autoplay, while a play()
+    // issued before the element has metadata is often rejected outright
+    // (AbortError) — either case used to leave a dead player behind.
+    if (!video.dataset.unmuted) video.muted = true;
     const started = video.play();
     if (started) {
-      started.catch(err => {
-        if (err && err.name === 'NotAllowedError' && !video.muted) {
-          video.muted = true;
-          video.play().catch(() => {});
-        }
+      started.catch(() => {
+        if (!video.paused) return;
+        video.muted = true;
+        video.play().catch(() => {});
       });
     }
   }
+
+  // Once frames are moving, ask the browser for sound back. If it says no,
+  // stay muted — the video keeps rolling and the controls offer unmute.
+  video.addEventListener('playing', () => {
+    if (video.muted && !video.dataset.unmuted) {
+      video.dataset.unmuted = '1';
+      video.muted = false;
+      if (video.paused) {
+        video.muted = true;
+        delete video.dataset.unmuted;
+      }
+    }
+  });
 
   function load() {
     video.src = sources[attempt];
