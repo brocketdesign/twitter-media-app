@@ -546,6 +546,37 @@ img, video { max-width: 100%; }
   margin: 6px 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.7;
 }
 
+/* --- back to top — a glass circle in the bottom-right corner; fills with
+   the brand gradient on hover, and keeps clear of the floating video strip
+   on phones by riding above it (#vstrip only exists on the scanner page). */
+.toTop {
+  position: fixed; z-index: 55;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: 46px; height: 46px; padding: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fg);
+  background: var(--glass-strong); border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: blur(var(--blur)); backdrop-filter: blur(var(--blur));
+  opacity: 0; visibility: hidden; transform: translateY(12px) scale(.9);
+  transition: opacity var(--t), transform var(--t), visibility var(--t),
+              background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.toTop.show { opacity: 1; visibility: visible; transform: none; }
+.toTop:hover:not(:disabled) {
+  background: var(--brand-grad); border-color: transparent;
+  color: #fff; box-shadow: var(--brand-glow); transform: translateY(-2px);
+}
+.toTop:active:not(:disabled) { transform: translateY(0) scale(.94); }
+.toTop svg { width: 20px; height: 20px; display: block; }
+/* never floats over the full-screen feed or under the video strip */
+body.feed-open .toTop { opacity: 0; visibility: hidden; transform: translateY(12px) scale(.9); }
+body:has(#vstrip:not([hidden])) .toTop { bottom: calc(96px + env(safe-area-inset-bottom)); }
+@media (max-width: 640px) {
+  .toTop { width: 42px; height: 42px; right: 14px; }
+}
+
 /* --- site footer --- */
 .sitefoot {
   margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border);

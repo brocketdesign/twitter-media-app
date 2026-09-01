@@ -77,3 +77,26 @@
   </a>
 </aside>
 {%- endmacro %}
+
+
+{# Back-to-top button, bottom right. Appears once the page is scrolled and
+   hides while the full-screen video feed is open or the floating video
+   strip would sit under it. #}
+{% macro back_to_top() -%}
+<button id="toTop" class="toTop" type="button" aria-label="Back to top" title="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 19V5"/>
+    <path d="M5 12l7-7 7 7"/>
+  </svg>
+</button>
+<script>
+(() => {
+  const btn = document.getElementById('toTop');
+  const toggle = () => btn.classList.toggle('show', window.scrollY > 420);
+  addEventListener('scroll', toggle, { passive: true });
+  toggle();
+  btn.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+})();
+</script>
+{%- endmacro %}
