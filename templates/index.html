@@ -130,7 +130,7 @@
     <div class="grid" id="grid"></div>
   </div>
 
-  <div class="vstrip" id="vstrip" hidden aria-label="Playing video"></div>
+  <div class="vstrip" id="vstrip" hidden aria-label="Videos you played"></div>
 
   <div class="feedscreen" id="feed" hidden aria-label="Video feed">
     <button type="button" class="fexit" id="feedExit" title="Close the feed (Esc)"
@@ -790,34 +790,39 @@ function renderGrid() {
   }
 }
 
-/* --- floating playing thumbnail ---------------------------------------
-   When a video is played inline, a small floating thumbnail of just that
-   video docks to the bottom of the page: on a large grid you can scroll
-   away while it plays and still see what is playing — tapping it scrolls
-   back to the video's cell. Nothing shows until something plays. */
+/* --- floating played-videos tray --------------------------------------
+   Every video the user clicks in the grid drops a thumbnail into one
+   docked, horizontally scrolling tray: on a large grid the clips you
+   have played stay one tap away, the one now playing keeps a lit edge,
+   and tapping any thumbnail scrolls back to its cell. */
 
-let playingVideo = null;
+let playedTray = [];   // clicked videos, most recent first
 
 function hidePlayingThumb() {
-  playingVideo = null;
+  playedTray = [];
   const strip = document.getElementById('vstrip');
   strip.hidden = true;
   strip.innerHTML = '';
 }
 
 function showPlayingThumb(item) {
-  playingVideo = item;
+  // A video clicked again moves to the front rather than duplicating.
+  playedTray = [item, ...playedTray.filter(i => i.url !== item.url)];
   const strip = document.getElementById('vstrip');
-  strip.innerHTML = `
-    <button type="button" class="sthumb playing" title="Scroll back to this video">
-      ${item.poster
-        ? `<img src="${escapeHtml(item.poster)}" alt=""
-               data-src="${escapeHtml(item.poster)}" onerror="posterFallback(this)">`
+  strip.innerHTML = playedTray.map((it, i) => `
+    <button type="button" class="sthumb${i === 0 ? ' playing' : ''}"
+            data-url="${escapeHtml(it.url)}" title="Scroll back to this video">
+      ${it.poster
+        ? `<img loading="lazy" src="${escapeHtml(it.poster)}" alt=""
+               data-src="${escapeHtml(it.poster)}" onerror="posterFallback(this)">`
         : '<span class="noimg">▶</span>'}
-      ${item.duration ? `<span class="sdur">${formatDuration(item.duration)}</span>` : ''}
-    </button>`;
+      ${it.duration ? `<span class="sdur">${formatDuration(it.duration)}</span>` : ''}
+    </button>`).join('');
   strip.hidden = false;
-  strip.querySelector('.sthumb').addEventListener('click', () => jumpToVideo(item.url));
+  strip.querySelectorAll('.sthumb').forEach(btn =>
+    btn.addEventListener('click', () => jumpToVideo(btn.dataset.url)));
+  // Keep the newest (playing) thumbnail in view as the tray fills up.
+  strip.scrollTo({ left: 0, behavior: 'smooth' });
 }
 
 function jumpToVideo(url) {
