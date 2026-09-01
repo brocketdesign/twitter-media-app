@@ -260,6 +260,12 @@ def classify_entry(entry):
         # came through, the prefix gallery-dl added to the caption still is.
         reposted_from = author.get("name") or (prefix.group(1) if prefix else "")
         text = re.sub(r"^RT @\w+: ?", "", text, count=1)
+    elif author.get("name") and (meta.get("user") or {}).get("name"):
+        # The posts-timeline pass: X can deliver a repost as the original
+        # tweet outright, with no retweet marker anywhere — the tell is an
+        # author who is not the account being scanned (`user` is that one).
+        if author["name"].lower() != meta["user"]["name"].lower():
+            reposted_from = author["name"]
     filename = meta.get("filename") or f"media_{tweet_id or 'unknown'}"
     filename = re.sub(r"[^\w.\-]", "_", f"{filename}.{ext}")
     date = meta.get("date") or ""
@@ -317,8 +323,6 @@ def scan():
         proc = run_gallery_dl(cookie_path, username, span)
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Scan timed out. Try a lower limit."}), 504
-    finally:
-        Path(cookie_path).unlink(missing_ok=True)
 
     # Second pass down the posts timeline, the only one that carries the
     # account's reposts. Best effort: a slow or failing pass must never cost
@@ -329,6 +333,9 @@ def scan():
                                timeout=300)
     except subprocess.TimeoutExpired:
         posts = None
+    finally:
+        Path(cookie_path).unlink(missing_ok=True)
+
     posts_entries = []
     if posts is not None:
         posts_entries = read_entries(posts.stdout) or []
