@@ -177,8 +177,13 @@ def run_gallery_dl(cookie_path, username, span, previews=True, timeout=600):
         "--retries", "3",
         "-o", f"previews={'true' if previews else 'false'}",
         # The media tab carries reposts alongside the account's own posts, but
-        # gallery-dl drops them unless asked — they are the "from @handle" rows.
-        "-o", "retweets=true",
+        # gallery-dl drops them unless asked. "original", not true: in true
+        # mode the retweet wrapper's legacy has no id_str and gallery-dl dies
+        # with a KeyError on the first repost, keeping only what came before
+        # it — a scan that shrinks to a couple of items. Original mode swaps
+        # the wrapper for the original tweet and survives; the app's URL
+        # dedup folds the same media reposted twice.
+        "-o", "retweets=original",
         "--cookies", cookie_path,
         f"https://twitter.com/{username}/media",
     ]
