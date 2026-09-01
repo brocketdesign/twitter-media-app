@@ -81,6 +81,7 @@
       <p class="muted">Paste just the value — a whole <code>auth_token=…; ct0=…</code>
         string dropped into either box gets split for you.</p>
       <div class="row">
+        <button type="button" class="secondary" id="fillCookiesBtn" onclick="fillFromSession()">Fill from my X session</button>
         <button type="button" class="secondary" id="checkCookiesBtn" onclick="checkCookies()">Check cookies</button>
         <button type="button" class="secondary" id="clearCookiesBtn" onclick="clearCookies()">Clear saved cookies</button>
       </div>
@@ -293,6 +294,10 @@ const REQUIRED_COOKIES = ['auth_token', 'ct0'];
 const COOKIE_FIELDS = { auth_token: 'ck_auth', ct0: 'ck_ct0' };
 const X_DOMAINS = ['x.com', 'twitter.com'];
 const NOT_COOKIE_NAMES = new Set(['cookie', 'set-cookie', 'name', 'host', 'domain', 'path']);
+// Where "Fill from my X session" sends people who do not have the extension
+// yet — swap in the listing's full URL once it should be linked directly.
+const EXTENSION_STORE_URL =
+  'https://chromewebstore.google.com/search/twitter%20media%20app%20media%20downloader';
 
 function cookieStore(action, value) {
   try {
@@ -466,6 +471,53 @@ function setCookieMsg(html, cls) {
 function focusCookies(html, cls) {
   document.getElementById('cookieBox').open = true;
   if (html) setCookieMsg(html, cls || 'warn');
+}
+
+/* Fill the boxes from the session the Chrome extension picked up. The page
+   itself can never read x.com's cookies (auth_token is httpOnly), so this
+   rides the same handoff the extension posts after you click its
+   Media Downloader item on x.com. */
+
+async function fillFromSession() {
+  const btn = document.getElementById('fillCookiesBtn');
+  btn.disabled = true;
+  setCookieMsg('<span class="spinner"></span>Checking for a session sent from x.com…');
+  try {
+    const res = await fetch('/api/extension/handoff');
+    const body = await res.json();
+    const pairs = parseCookieText(body.cookies || '');
+    if (body.pending && Object.keys(pairs).length) {
+      writeCookies(pairs, null);
+      setCookieMsg('Filled from your x.com session'
+        + (body.username ? ' as @' + escapeHtml(body.username) : '')
+        + '. Hit <b>Check cookies</b> to confirm it, or just Scan.', 'ok');
+    } else if (body.extension_seen) {
+      // The extension is installed in this browser (it pinged the app at some
+      // point) — it just has not sent a session over yet.
+      focusCookies('Nothing waiting yet. On any x.com tab, click the '
+        + '<b>Media Downloader</b> item in X\'s left sidebar (or the '
+        + 'extension\'s toolbar icon) — it sends this browser\'s login '
+        + 'session over — then click <b>Fill from my X session</b> here.', 'warn');
+    } else {
+      // The extension ships on the Chrome Web Store; drop the real listing
+      // URL into EXTENSION_STORE_URL when it should be linked directly.
+      const store = EXTENSION_STORE_URL;
+      focusCookies('No extension found in this browser, so there is nothing to '
+        + 'fill from yet. Two ways forward:<br>'
+        + '<small>1. Install the <b>Media Downloader</b> extension from the '
+        + '<a href="' + store + '" target="_blank" rel="noopener">Chrome Web Store ↗</a> '
+        + '(search “twitter media app media downloader” if that link misses), '
+        + 'then use its <b>Media Downloader</b> item in X\'s sidebar on x.com '
+        + 'and come back here.<br>'
+        + '2. Skip the extension: copy <b>auth_token</b> and <b>ct0</b> from '
+        + 'DevTools → Application → Cookies on x.com into the boxes above.</small>',
+        'warn');
+    }
+  } catch (e) {
+    setCookieMsg('Could not reach the app: ' + escapeHtml(String(e)), 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function checkCookies() {

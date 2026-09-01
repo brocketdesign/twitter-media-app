@@ -540,10 +540,26 @@ def _check_media_url(url):
 _HANDOFF_TTL = 15 * 60
 _handoff = {}
 
+# Whether an extension lives in this browser at all: both its liveness ping
+# and a handoff prove one is installed, and the dashboard uses that to decide
+# whether "fill my cookies" should say "click the sidebar item" or walk the
+# user through installing it.
+_EXTENSION_SEEN_TTL = 24 * 3600
+_extension = {"last_seen": 0.0}
+
+
+def _note_extension():
+    _extension["last_seen"] = time.time()
+
+
+def extension_seen():
+    return time.time() - _extension["last_seen"] <= _EXTENSION_SEEN_TTL
+
 
 @app.get("/api/ping")
 def ping():
     """Liveness probe the extension uses to show app status on x.com."""
+    _note_extension()
     return jsonify({"ok": True, "app": "twitter-media-app"})
 
 
@@ -562,6 +578,7 @@ def extension_handoff():
     if problem:
         return jsonify(problem), 400
 
+    _note_extension()
     _handoff.clear()
     _handoff.update(
         username=username,
@@ -576,10 +593,11 @@ def extension_handoff_take():
     """One-shot: the dashboard reads a pending handoff, which consumes it."""
     if _handoff and time.time() - _handoff["at"] <= _HANDOFF_TTL:
         payload = dict(_handoff)
+        payload["extension_seen"] = extension_seen()
         _handoff.clear()
         return jsonify({"pending": True, **payload})
     _handoff.clear()
-    return jsonify({"pending": False})
+    return jsonify({"pending": False, "extension_seen": extension_seen()})
 
 
 # twimg often answers with a generic octet-stream, which stops <video> from
