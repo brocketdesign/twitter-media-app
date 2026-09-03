@@ -4,6 +4,7 @@ Paste a username or profile URL, scan the account's media timeline,
 and get images and videos listed separately, ready to download.
 """
 
+import collections
 import json
 import os
 import re
@@ -726,34 +727,68 @@ def zip_all():
     if not items or len(items) > 200:
         return jsonify({"error": "Need 1-200 items."}), 400
 
-    spooled = tempfile.SpooledTemporaryFile(max_size=128 * 1024 * 1024)
-    with zipfile.ZipFile(spooled, "w", zipfile.ZIP_DEFLATED) as zf:
-        used = set()
-        for it in items:
-            url = it.get("url", "")
-            if not _check_media_url(url):
-                continue
-            name = re.sub(r"[^\w.\-]", "_", it.get("name") or "media")
-            while name in used:
-                name = "_" + name
-            used.add(name)
-            try:
-                r = requests.get(url, headers=MEDIA_HEADERS, timeout=60)
-                r.raise_for_status()
-                zf.writestr(name, r.content)
-            except requests.RequestException:
-                continue
-    spooled.seek(0)
+    # The archive is streamed while it is built: a big part can take minutes,
+    # and holding the response silent that long gets the connection killed by
+    # the proxy (the browser then just sees "Failed to fetch").
+    class _ChunkPipe:
+        """Minimal file object that hands zip bytes to the response stream."""
+
+        def __init__(self):
+            self._buf = collections.deque()
+            self._pos = 0
+            self.done = False
+
+        def write(self, data):
+            self._buf.append(data)
+            self._pos += len(data)
+
+        def close(self):
+            self.done = True
+
+        def flush(self):
+            pass
+
+        def seekable(self):
+            return False
+
+        def tell(self):
+            # zipfile writes via seek() on seekable streams; reporting the real
+            # position marks this stream as unseekable, which it also handles.
+            return self._pos
+
+    pipe = _ChunkPipe()
 
     def gen():
+        zf = zipfile.ZipFile(pipe, "w", zipfile.ZIP_DEFLATED)
+        used = set()
         try:
-            while True:
-                chunk = spooled.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
+            for it in items:
+                url = it.get("url", "")
+                if not _check_media_url(url):
+                    continue
+                name = re.sub(r"[^\w.\-]", "_", it.get("name") or "media")
+                while name in used:
+                    name = "_" + name
+                used.add(name)
+                try:
+                    r = requests.get(url, headers=MEDIA_HEADERS, timeout=60, stream=True)
+                    r.raise_for_status()
+                    with zf.open(name, "w") as dst:
+                        for chunk in r.iter_content(256 * 1024):
+                            dst.write(chunk)
+                except requests.RequestException:
+                    continue
+                # Drain whatever the zipper buffered so the response keeps moving.
+                while pipe._buf:
+                    yield pipe._buf.popleft()
+            zf.close()
         finally:
-            spooled.close()
+            try:
+                zf.close()
+            except Exception:
+                pass
+        while pipe._buf:
+            yield pipe._buf.popleft()
 
     return Response(
         stream_with_context(gen()),
