@@ -1036,6 +1036,8 @@ let feedItems = [];        // { cell, video, item, visible, dead }
 let feedPromptDone = false;   // the sound prompt is asked once per feed
 let feedSound = false;
 let feedTick = 0;
+let feedCursor = 0;        // where the shared queue hands out the next video
+let feedClaims = new Set();   // playlist indices already handed to a cell
 const FEED_VISIBLE = 0.6;  // share of a video on screen for it to count as watched
 
 function feedTrackEl() { return document.getElementById('feedTrack'); }
@@ -1048,6 +1050,8 @@ function teardownFeed() {
   removeEventListener('resize', onFeedScroll);
   clearTimeout(feedTick);
   feedTick = 0;
+  feedCursor = 0;
+  feedClaims.clear();
   for (const entry of feedItems) {
     entry.dead = true;   // its error handler must not resurrect it
     entry.visible = false;
@@ -1075,56 +1079,49 @@ function renderFeed() {
     return;
   }
   feedPromptDone = false;
-  const set = selected.videos;
-  for (const it of items) {
-    const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
-    const isPicked = set.has(it.url);
+  // Cells are slots, not one-per-video: an empty slot claims the next
+  // unclaimed video from the shared queue when it reaches the screen, and
+  // when its video ends it claims the next one again, in place. That way a
+  // row of three keeps playing new videos without scrolling, and the row
+  // below is still holding something you have not seen.
+  for (let i = 0; i < items.length; i++) {
     const cell = document.createElement('div');
     cell.className = 'fcell';
-    cell.id = 'fcell-' + hashId(it.url);
     cell.innerHTML = `
-      <video playsinline loop muted preload="none"
-             ${it.poster ? `poster="${escapeHtml(it.poster)}"` : ''}></video>
-      <input class="fpick" type="checkbox" ${isPicked ? 'checked' : ''} title="Select for sending">
+      <video playsinline muted preload="none"></video>
+      <input class="fpick" type="checkbox" title="Select for sending">
       <span class="dlbadge fdledge" hidden title="Already downloaded to this machine">${ICON_SAVED}</span>
-      <div class="finfo">
-        <div class="who">${escapeHtml(it.date)} ${whoLine(it)}</div>
-        <div class="text">${escapeHtml(it.text)}</div>
-        <div class="actions">
-          <a class="dl" href="${dl}" data-url="${escapeHtml(it.url)}" title="Download this video" aria-label="Download">
-            ${ICON_DOWNLOAD}<span class="lbl">Download</span>
-          </a>
-          ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener"
-                              title="Open the tweet" aria-label="Open the tweet">
-            ${ICON_TWEET}<span class="lbl">Tweet</span>
-          </a>` : ''}
-        </div>
-      </div>`;
-    cell.querySelector('.fpick').addEventListener('change', e => togglePick(it.url, e.target.checked));
-
-    const video = cell.querySelector('video');
-    const entry = { cell, video, item: it, visible: false };
-    feedItems.push(entry);
-    // Anywhere but the buttons at the foot: a tap is the sound switch.
+      <div class="finfo"></div>`;
     cell.addEventListener('click', e => {
       if (e.target.closest('a, input, .rt')) return;
       toggleFeedSound();
+    });
+
+    const video = cell.querySelector('video');
+    const entry = { cell, video, item: null, visible: false };
+    feedItems.push(entry);
+    cell.querySelector('.fpick').addEventListener('change', e => {
+      if (entry.item) togglePick(entry.item.url, e.target.checked);
     });
     // Same two-source dance as the grid player: the proxy first, because
     // twimg turns down plenty of direct hits from the page.
     video.dataset.attempt = '0';
     video.addEventListener('error', () => {
-      if (entry.dead || !video.src) return;
+      if (entry.dead || !entry.item || !video.src) return;
       const next = Number(video.dataset.attempt) + 1;
       if (next > 1) return;      // both sources refused — leave the poster up
       video.dataset.attempt = String(next);
-      video.src = it.url;
+      video.src = entry.item.url;
       video.load();
       if (entry.visible) playFeedVideo(entry);
     });
     // A play() the browser turned down still leaves autoplay armed, so try
     // again the moment there are frames to show.
     video.addEventListener('canplay', () => { if (entry.visible) playFeedVideo(entry); });
+    video.addEventListener('ended', () => {
+      if (entry.dead || !entry.item) return;
+      advanceFeedCell(entry);
+    });
     track.appendChild(cell);
   }
 
@@ -1139,6 +1136,77 @@ function renderFeed() {
   updateFeedActive();
   updateFeedPrompt();
   refreshDownloadedMarks();
+}
+
+/* Hand out the next video nobody is showing or has lined up. `exclude`
+   carries the indices on screen right now, so a finished slot never takes a
+   twin of a video still playing beside it. When every video has been through
+   the feed once, the rotation starts over. */
+function claimFeedItem(exclude) {
+  const n = data.videos.length;
+  if (!n) return -1;
+  for (let round = 0; round < 2; round++) {
+    if (round === 1) feedClaims.clear();   // played through the whole scan
+    for (let k = 0; k < n; k++) {
+      const i = (feedCursor + k) % n;
+      if (feedClaims.has(i) || (exclude && exclude.has(i))) continue;
+      feedClaims.add(i);
+      feedCursor = (i + 1) % n;
+      return i;
+    }
+  }
+  return -1;
+}
+
+function fillFeedCell(entry, index) {
+  const it = data.videos[index];
+  entry.item = it;
+  entry.cell.id = 'fcell-' + hashId(it.url);
+  const dl = `/api/download?url=${encodeURIComponent(it.url)}&name=${encodeURIComponent(it.filename)}`;
+  const isPicked = selected.videos.has(it.url);
+  entry.cell.querySelector('.fpick').checked = isPicked;
+  entry.cell.querySelector('.finfo').innerHTML = `
+    <div class="who">${escapeHtml(it.date)} ${whoLine(it)}</div>
+    <div class="text">${escapeHtml(it.text)}</div>
+    <div class="actions">
+      <a class="dl" href="${dl}" data-url="${escapeHtml(it.url)}" title="Download this video" aria-label="Download">
+        ${ICON_DOWNLOAD}<span class="lbl">Download</span>
+      </a>
+      ${it.tweet_url ? `<a class="tw" href="${it.tweet_url}" target="_blank" rel="noopener"
+                          title="Open the tweet" aria-label="Open the tweet">
+        ${ICON_TWEET}<span class="lbl">Tweet</span>
+      </a>` : ''}
+    </div>`;
+  entry.video.poster = it.poster || '';
+  entry.video.dataset.attempt = '0';
+  entry.video.autoplay = false;
+  entry.video.removeAttribute('src');
+  entry.video.load();
+  markFeedDownloaded(entry);
+}
+
+function markFeedDownloaded(entry) {
+  const got = downloaded.has(entry.item.url);
+  entry.cell.classList.toggle('dled', got);
+  const badge = entry.cell.querySelector('.dlbadge');
+  if (badge) badge.hidden = !got;
+}
+
+function advanceFeedCell(entry) {
+  const exclude = new Set();
+  for (const other of feedItems) {
+    if (other !== entry && other.visible && other.item) {
+      exclude.add(data.videos.indexOf(other.item));
+    }
+  }
+  const index = claimFeedItem(exclude);
+  if (index < 0) {   // one video in the scan: replay it rather than go dark
+    entry.video.currentTime = 0;
+    entry.video.play().catch(() => {});
+    return;
+  }
+  fillFeedCell(entry, index);
+  if (entry.visible) playFeedVideo(entry);
 }
 
 function onFeedScroll() {
@@ -1158,21 +1226,35 @@ function updateFeedActive() {
     const visible = box.height > 0 && shown / box.height >= FEED_VISIBLE;
     if (visible === entry.visible) continue;
     entry.visible = visible;
-    if (visible) playFeedVideo(entry); else pauseFeedVideo(entry);
+    if (!visible) { pauseFeedVideo(entry); continue; }
+    if (!entry.item) fillFeedCell(entry, claimFeedItem());
+    playFeedVideo(entry);
   }
   primeFeedNeighbours();
 }
 
-/* The next video down is fetched while this one plays, so a swipe lands on
-   something ready rather than on a black frame. */
+/* The row below the screen is fetched while the current one plays, so a
+   swipe lands on something ready rather than on a black frame. */
 function primeFeedNeighbours() {
+  const cols = feedColumns();
   const last = feedItems.reduce((n, e, i) => (e.visible ? i : n), -1);
   if (last < 0) return;
-  for (let i = last + 1; i <= last + 2 && i < feedItems.length; i++) loadFeedVideo(feedItems[i]);
+  const start = (Math.floor(last / cols) + 1) * cols;
+  for (let i = start; i < start + cols && i < feedItems.length; i++) {
+    const entry = feedItems[i];
+    if (!entry.item) fillFeedCell(entry, claimFeedItem());
+    loadFeedVideo(entry);
+  }
+}
+
+function feedColumns() {
+  if (matchMedia('(min-width: 1180px)').matches) return 3;
+  if (matchMedia('(min-width: 720px)').matches) return 2;
+  return 1;
 }
 
 function loadFeedVideo(entry) {
-  if (entry.video.src) return;
+  if (!entry.item || entry.video.src) return;
   entry.video.preload = 'auto';
   entry.video.src = streamUrl(entry.item.url);
   entry.video.load();
