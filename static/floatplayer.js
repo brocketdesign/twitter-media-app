@@ -72,6 +72,7 @@
   let peekTimer = 0, skipTimer = 0, hideTimer = 0;
   let drag = null;
   const hoverCapable = matchMedia('(hover: hover)').matches;
+  const touchOnly = matchMedia('(hover: none)').matches;
 
   function el(html) {
     const t = document.createElement('template');
@@ -150,8 +151,10 @@
           <button type="button" data-act="toggle" title="Play or pause" aria-label="Play or pause">${ICON.play}</button>
           <button type="button" data-act="next" title="Next video" aria-label="Next video">${ICON.next}</button>
           <span class="fsep"></span>
-          <input class="fseek" id="fpseek" type="range" min="0" max="1000" value="0" title="Seek" aria-label="Seek">
-          <span class="ftime" id="fptime">0:00 / 0:00</span>
+          <span class="fseekgrp">
+            <input class="fseek" id="fpseek" type="range" min="0" max="1000" value="0" title="Seek" aria-label="Seek">
+            <span class="ftime" id="fptime">0:00 / 0:00</span>
+          </span>
           <span class="fsep"></span>
           <span class="ftitle" id="fptitle"></span>
           <span class="fsep"></span>
@@ -220,14 +223,25 @@
     });
 
     // Hovering the tray swings the toolbar out above it; the grace period on
-    // hide covers the gap between the two.
+    // hide covers the gap between the two. On touch there is no hover: a tap
+    // on the tray (or the pad) opens the toolbar and a tap anywhere else
+    // closes it, so it stays put while the toolbar is being used.
     const target = trayTarget();
     target.addEventListener('mouseenter', showBar);
-    target.addEventListener('mouseleave', scheduleHideBar);
+    target.addEventListener('mouseleave', () => { if (!touchOnly) scheduleHideBar(); });
     bar.addEventListener('mouseenter', () => clearTimeout(hideTimer));
-    bar.addEventListener('mouseleave', scheduleHideBar);
+    bar.addEventListener('mouseleave', () => { if (!touchOnly) scheduleHideBar(); });
+    if (touchOnly) {
+      document.addEventListener('pointerdown', e => {
+        if (!bar.contains(e.target) && !target.contains(e.target)) hideBarNow();
+      }, true);
+    }
     pad.addEventListener('click', () => {
-      if (bar.classList.contains('show')) scheduleHideBar(); else showBar();
+      if (bar.classList.contains('show')) {
+        touchOnly ? hideBarNow() : scheduleHideBar();
+      } else {
+        showBar();
+      }
     });
 
     video.addEventListener('play', () => { btnToggle.innerHTML = ICON.pause; });

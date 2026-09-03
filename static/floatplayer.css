@@ -101,6 +101,7 @@
 .fbar button.on { background: var(--brand-grad); color: #fff; box-shadow: var(--brand-glow); }
 .fbar button svg { width: 17px; height: 17px; }
 .fsep { flex: none; width: 1px; height: 20px; background: var(--border); }
+.fseekgrp { display: flex; align-items: center; gap: 5px; }
 .fseek { flex: none; width: 150px; accent-color: var(--accent); }
 .ftime {
   flex: none; font-size: 11px; color: var(--muted); white-space: nowrap;
@@ -139,8 +140,21 @@ body.fplayer-open .toTop { bottom: calc(96px + env(safe-area-inset-bottom)); }
 
 @media (max-width: 720px) {
   .ftitle, .fsep { display: none; }
-  .fseek { width: 90px; }
-  .ftime { min-width: 0; }
+  /* two rows: transport + settings on top, the seek line centered below */
+  .fbar {
+    flex-wrap: wrap; justify-content: center; row-gap: 3px;
+    max-width: 94vw; padding: 8px; border-radius: var(--r-lg);
+  }
+  .fbar button { width: 31px; height: 31px; }
+  .fseekgrp { order: 10; flex: 1 1 100%; justify-content: center; }
+  .fseek { flex: 0 1 150px; width: auto; }
+  .fopacity { width: 56px; }
+}
+@media (max-width: 380px) {
+  .fbar button { width: 28px; height: 28px; }
+  .fbar button svg { width: 15px; height: 15px; }
+  .fopacity { width: 44px; }
+  .fseek { flex-basis: 130px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .fbar, .fplayer { transition: none; }

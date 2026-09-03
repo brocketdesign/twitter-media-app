@@ -783,6 +783,12 @@ function showTab(tab) {
 
 function showView(view) {
   currentView = view;
+  // The feed is the full-screen watching experience on its own — the floating
+  // player would fight it for the same videos, so it stands down entirely.
+  // Checked before the tab switch below, which can return early.
+  if (view === 'feed' && window.FloatPlayer && FloatPlayer.isActive()) {
+    FloatPlayer.close();
+  }
   // Asking for the feed means asking for videos.
   if (view === 'feed' && currentTab !== 'videos') { showTab('videos'); return; }
   render();
