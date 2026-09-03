@@ -1112,6 +1112,7 @@ function renderFeed() {
       const next = Number(video.dataset.attempt) + 1;
       if (next > 1) return;      // both sources refused — leave the poster up
       video.dataset.attempt = String(next);
+      video.dataset.loadedUrl = entry.item.url;
       video.src = entry.item.url;
       video.load();
       if (entry.visible) playFeedVideo(entry);
@@ -1185,12 +1186,12 @@ function fillFeedCell(entry, index) {
       </a>` : ''}
     </div>`;
   entry.video.poster = it.poster || '';
-  entry.video.dataset.attempt = '0';
-  entry.video.autoplay = false;
-  entry.video.removeAttribute('src');
-  entry.video.load();
   entry.cell.querySelector('.fprog span').style.width = '0';
   markFeedDownloaded(entry);
+  // The old source, if any, is replaced by loadFeedVideo's single load() —
+  // calling load() here too (once bare, once with data) wedges the element's
+  // resource selection and the video never starts.
+  entry.video.dataset.loadedUrl = '';
 }
 
 function markFeedDownloaded(entry) {
@@ -1235,7 +1236,11 @@ function updateFeedActive() {
     if (visible === entry.visible) continue;
     entry.visible = visible;
     if (!visible) { pauseFeedVideo(entry); continue; }
-    if (!entry.item) fillFeedCell(entry, claimFeedItem());
+    if (!entry.item) {
+      const index = claimFeedItem();
+      if (index < 0) continue;
+      fillFeedCell(entry, index);
+    }
     playFeedVideo(entry);
   }
   primeFeedNeighbours();
@@ -1250,7 +1255,11 @@ function primeFeedNeighbours() {
   const start = (Math.floor(last / cols) + 1) * cols;
   for (let i = start; i < start + cols && i < feedItems.length; i++) {
     const entry = feedItems[i];
-    if (!entry.item) fillFeedCell(entry, claimFeedItem());
+    if (!entry.item) {
+      const index = claimFeedItem();
+      if (index < 0) return;
+      fillFeedCell(entry, index);
+    }
     loadFeedVideo(entry);
   }
 }
@@ -1262,9 +1271,13 @@ function feedColumns() {
 }
 
 function loadFeedVideo(entry) {
-  if (!entry.item || entry.video.src) return;
+  if (!entry.item) return;
+  const want = streamUrl(entry.item.url);
+  if (entry.video.dataset.loadedUrl === want) return;   // already on it
+  entry.video.dataset.loadedUrl = want;
+  entry.video.dataset.attempt = '0';
   entry.video.preload = 'auto';
-  entry.video.src = streamUrl(entry.item.url);
+  entry.video.src = want;
   entry.video.load();
 }
 
