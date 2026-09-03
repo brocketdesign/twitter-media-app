@@ -17,6 +17,9 @@
   border: 1px solid var(--glass-border);
   box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
   transition: opacity .25s ease, border-color var(--t-fast);
+  /* resting see-through level — the toolbar's transparency slider feeds
+     these two custom properties (peek is the hover level) */
+  opacity: var(--fp-rest, 1);
 }
 .fplayer video {
   display: block; width: 100%; height: auto;
@@ -25,7 +28,7 @@
   aspect-ratio: 16 / 9;
   object-fit: contain; background: #000;
 }
-.fplayer.peek { opacity: .5; pointer-events: none; }
+.fplayer.peek { opacity: var(--fp-peek, .5); pointer-events: none; }
 .fplayer.grab { cursor: grab; border-style: dashed; border-color: rgba(130, 64, 255, .65); }
 .fplayer.grabbing { cursor: grabbing; }
 
@@ -107,6 +110,11 @@
   flex: none; max-width: 170px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-size: 12px; color: var(--muted);
 }
+
+/* the default-transparency slider: an icon and a short range input */
+.fop { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.fop svg { width: 15px; height: 15px; flex: none; }
+.fopacity { flex: none; width: 72px; accent-color: var(--accent); }
 
 /* fallback handle where there is no tray to hover (gallery, character
    editor): a small round pad in the tray's spot */

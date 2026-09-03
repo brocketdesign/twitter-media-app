@@ -10,9 +10,9 @@
      <video> element is handed to the PiP window, so the playlist keeps
      advancing there (its 'ended' still fires on this page).
    - "Becomes transparent under the mouse": hovering the window fades it to
-     half opacity and makes it click-through, so the page behind can be read
-     and clicked while the clip keeps rolling. Moving the cursor away brings
-     the window back.
+     half the chosen default transparency (the toolbar slider) and makes it
+     click-through, so the page behind can be read and clicked while the
+     clip keeps rolling. Moving the cursor away brings the window back.
    - "Grab mode": the toolbar unlocks the window for dragging; a second click
      (on the toolbar or on the window itself) locks it in place.
    - "A thumbnail appears in the menu": every clip that starts is announced
@@ -55,17 +55,19 @@
     pip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="12" width="7" height="5" rx="1" fill="currentColor" stroke="none"/></svg>',
     close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     pad: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg>',
+    op: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>',
   };
 
   const state = {
     queue: [], index: 0, active: false,
     sound: false, grab: false, pip: false,
+    opacity: 100,               // resting see-through level, 20 (ghost) … 100 (solid)
     x: 0, y: 0, placed: false,
     attempt: 0, skips: 0, seekHeld: false,
   };
 
   let root, surface, video, lockBtn, grabHint, miniLbl, prog,
-      bar, pad, seek, timeLbl, titleLbl,
+      bar, pad, seek, timeLbl, titleLbl, opInput, opWrap,
       btnToggle, btnSound, btnGrab, btnPip;
   let peekTimer = 0, skipTimer = 0, hideTimer = 0;
   let drag = null;
@@ -121,6 +123,7 @@
         placed: state.placed,
         grab: state.grab,
         sound: state.sound,
+        opacity: state.opacity,
       }));
     } catch (e) { /* storage full or disabled — the player still works this page */ }
   }
@@ -152,6 +155,10 @@
           <span class="fsep"></span>
           <span class="ftitle" id="fptitle"></span>
           <span class="fsep"></span>
+          <span class="fop" id="fpfop" title="Default transparency">
+            ${ICON.op}
+            <input class="fopacity" id="fpopacity" type="range" min="20" max="100" step="5" value="100" aria-label="Default transparency">
+          </span>
           <button type="button" data-act="sound" title="Sound on or off" aria-label="Sound on or off">${ICON.soundOff}</button>
           <button type="button" data-act="grab" title="Move the player (grab mode)" aria-label="Move the player">${ICON.move}</button>
           <button type="button" data-act="pip" title="Float over all windows (Picture-in-Picture)" aria-label="Float over all windows">${ICON.pip}</button>
@@ -173,6 +180,8 @@
     seek = root.querySelector('#fpseek');
     timeLbl = root.querySelector('#fptime');
     titleLbl = root.querySelector('#fptitle');
+    opInput = root.querySelector('#fpopacity');
+    opWrap = root.querySelector('#fpfop');
     btnToggle = bar.querySelector('[data-act=toggle]');
     btnSound = bar.querySelector('[data-act=sound]');
     btnGrab = bar.querySelector('[data-act=grab]');
@@ -182,6 +191,7 @@
       btnPip.hidden = true;   // no OS floating window on this browser
     }
 
+    applyOpacity();
     wire();
   }
 
@@ -257,6 +267,8 @@
     });
     seek.addEventListener('pointerdown', () => { state.seekHeld = true; });
     addEventListener('pointerup', () => { state.seekHeld = false; });
+
+    opInput.addEventListener('input', () => setOpacity(Number(opInput.value)));
 
     wirePeek();
     wireDrag();
@@ -585,6 +597,28 @@
     save();
   }
 
+  /* --- default transparency ------------------------------------------------
+     The window's resting see-through level, chosen on the toolbar. Hovering
+     still fades it further (half the resting level, floored at 15%) and
+     makes it click-through, exactly as before — the slider just decides
+     where the video sits when nobody is touching it. */
+  function setOpacity(v) {
+    state.opacity = Math.min(100, Math.max(20, Math.round(v)));
+    applyOpacity();
+    save();
+  }
+
+  function applyOpacity() {
+    const rest = state.opacity / 100;
+    const peek = Math.max(0.15, rest * 0.5);
+    surface.style.setProperty('--fp-rest', rest.toFixed(2));
+    surface.style.setProperty('--fp-peek', peek.toFixed(2));
+    opInput.value = state.opacity;
+    const label = `Default transparency: ${state.opacity}%`;
+    opInput.title = label;
+    opWrap.title = label;
+  }
+
   function renderSoundUI() {
     btnSound.innerHTML = state.sound ? ICON.soundOn : ICON.soundOff;
     btnSound.classList.toggle('on', state.sound);
@@ -668,6 +702,7 @@
     state.placed = !!saved.placed;
     state.x = Number(saved.x) || 0;
     state.y = Number(saved.y) || 0;
+    state.opacity = Math.min(100, Math.max(20, Number(saved.opacity) || 100));
 
     mount();
     document.body.classList.add('fplayer-open');
