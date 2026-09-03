@@ -10,6 +10,8 @@
   '/'
 ) }}
 <link rel="stylesheet" href="{{ static_v('base.css') }}">
+<link rel="stylesheet" href="{{ static_v('floatplayer.css') }}">
+<script src="{{ static_v('floatplayer.js') }}" defer></script>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -122,6 +124,9 @@
             </svg>
           </button>
         </div>
+        <button class="secondary" id="autoPlayBtn" onclick="startAutoPlay()">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:13px;height:13px;vertical-align:-2px;margin-right:5px"><path d="M8 5.5v13a1 1 0 0 0 1.54.84l10-6.5a1 1 0 0 0 0-1.68l-10-6.5A1 1 0 0 0 8 5.5z"/></svg>Auto-play
+        </button>
         <button class="secondary" id="selectAllBtn" onclick="toggleSelectAll()">Select all</button>
         <button id="sendBtn" onclick="openSendModal()">Send to character…</button>
         <button class="secondary" id="zipBtn" onclick="downloadZip()">Download tab as ZIP</button>
@@ -794,6 +799,7 @@ function render() {
   document.getElementById('grid').hidden = isFeed;
   document.getElementById('feed').hidden = !isFeed;
   if (isFeed) renderFeed(); else renderGrid();
+  updateAutoPlayBtn();
 }
 
 function togglePick(url, checked) {
@@ -901,7 +907,17 @@ function renderGrid() {
       </div>`;
     cell.querySelector('.pick').addEventListener('change', e => togglePick(it.url, e.target.checked));
     const vthumb = cell.querySelector('.vthumb');
-    if (vthumb) vthumb.addEventListener('click', () => playVideo(vthumb, it));
+    if (vthumb) vthumb.addEventListener('click', () => {
+      // While the floating player is running, a grid click steers it instead
+      // of starting a second player in the cell.
+      if (window.FloatPlayer && FloatPlayer.isActive()) {
+        if (!FloatPlayer.jumpTo(it.url)) {
+          FloatPlayer.start(floatItems(), Math.max(0, data.videos.findIndex(v => v.url === it.url)));
+        }
+        return;
+      }
+      playVideo(vthumb, it);
+    });
     grid.appendChild(cell);
   }
   refreshDownloadedMarks();
@@ -1181,6 +1197,42 @@ function streamUrl(url) {
   return `/api/stream?url=${encodeURIComponent(url)}`;
 }
 
+/* --- floating auto-play player -----------------------------------------
+   The scanner feeds the shared player (static/floatplayer.js, loaded on
+   every page) the videos of the current scan; it plays them one by one in a
+   window the user can grab, park, fade under the mouse, or hand to the
+   browser's Picture-in-Picture so it floats over other apps. */
+
+function floatItems() {
+  return data.videos.map(it => ({
+    origin: it.url,
+    // The proxy comes first, the raw CDN URL second — the same order the
+    // inline grid player tries its sources in.
+    srcs: [streamUrl(it.url), it.url],
+    poster: it.poster || '',
+    filename: it.filename,
+    text: (it.text || '').slice(0, 140),
+    user: it.user || '',
+    date: it.date || '',
+    duration: it.duration || 0,
+    tweet_url: it.tweet_url || '',
+  }));
+}
+
+function startAutoPlay() {
+  if (!data.videos.length || !window.FloatPlayer) return;
+  FloatPlayer.start(floatItems(), 0);
+}
+
+function updateAutoPlayBtn() {
+  const btn = document.getElementById('autoPlayBtn');
+  if (!btn) return;
+  btn.disabled = !data.videos.length;
+  btn.title = data.videos.length
+    ? `Play all ${data.videos.length} video(s) one by one in the floating player`
+    : 'No videos in this scan';
+}
+
 function playVideo(placeholder, item) {
   // Only one video plays at a time.
   document.querySelectorAll('.vplayer video').forEach(v => { if (!v.paused) v.pause(); });
@@ -1452,7 +1504,18 @@ async function downloadZip() {
       }
       let blob;
       try {
-        blob = await res.blob();
+        // Read the stream by hand instead of res.blob(): some Chromium
+        // setups (in-app browsers, Opera among them) abort res.blob() on
+        // streamed bodies with a bare "TypeError: Failed to fetch", while
+        // the very same body reads fine chunk by chunk.
+        const reader = res.body.getReader();
+        const chunks = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        blob = new Blob(chunks, { type: 'application/zip' });
       } catch (e) {
         // Headers arrived (streaming), but the body died partway — a proxy or
         // network cut. The browser reports it as the same vague TypeError.
