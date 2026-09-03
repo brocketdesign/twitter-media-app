@@ -64,7 +64,7 @@
     attempt: 0, skips: 0, seekHeld: false,
   };
 
-  let root, surface, video, badge, lockBtn, grabHint, miniLbl, prog,
+  let root, surface, video, lockBtn, grabHint, miniLbl, prog,
       bar, pad, seek, timeLbl, titleLbl,
       btnToggle, btnSound, btnGrab, btnPip;
   let peekTimer = 0, skipTimer = 0, hideTimer = 0;
@@ -133,7 +133,6 @@
       <div id="fplayerRoot">
         <div class="fplayer" id="fplayer" hidden>
           <video id="fpvideo" playsinline preload="auto"></video>
-          <span class="fbadge" id="fpbadge"></span>
           <button type="button" class="flock" id="fplock" hidden
                   title="Lock it in place" aria-label="Lock the player in place">${ICON.lock}</button>
           <span class="fgrabhint" id="fpgrabhint" hidden>Drag to move · Lock to fix it</span>
@@ -165,7 +164,6 @@
 
     surface = root.querySelector('#fplayer');
     video = root.querySelector('#fpvideo');
-    badge = root.querySelector('#fpbadge');
     lockBtn = root.querySelector('#fplock');
     grabHint = root.querySelector('#fpgrabhint');
     miniLbl = root.querySelector('#fpminilbl');
@@ -225,6 +223,18 @@
     video.addEventListener('play', () => { btnToggle.innerHTML = ICON.pause; });
     video.addEventListener('pause', () => { btnToggle.innerHTML = ICON.play; });
     video.addEventListener('ended', () => advance(1));
+    // The window is only correctly sized once the clip's aspect is known;
+    // park it for real then, or just keep a placed window on screen.
+    video.addEventListener('loadedmetadata', () => {
+      sizeToVideo();
+      if (!state.placed) {
+        state.placed = true;
+        place(defaultX(), defaultY());
+      } else {
+        place(clampX(state.x), clampY(state.y));
+      }
+      save();
+    });
     // A play() issued before the element has metadata is sometimes rejected
     // outright; once frames exist, start again if it is still sitting paused.
     // The first frame also becomes the tray thumbnail right away — the
@@ -265,7 +275,9 @@
     });
 
     addEventListener('resize', () => {
-      if (state.active && state.placed) place(clampX(state.x), clampY(state.y));
+      if (!state.active) return;
+      sizeToVideo();
+      if (state.placed) place(clampX(state.x), clampY(state.y));
       if (bar.classList.contains('show')) showBar();
     });
   }
@@ -307,7 +319,11 @@
     surface.addEventListener('mouseenter', () => {
       if (state.grab || state.pip) return;
       clearTimeout(peekTimer);
-      peekTimer = setTimeout(() => surface.classList.add('peek'), PEEK_DELAY);
+      peekTimer = setTimeout(() => {
+        // the cursor may have moved on during the delay — only fade if the
+        // window is genuinely still under it
+        if (surface.matches(':hover')) surface.classList.add('peek');
+      }, PEEK_DELAY);
     });
     surface.addEventListener('mouseleave', () => clearTimeout(peekTimer));
     document.addEventListener('mousemove', e => {
@@ -364,6 +380,18 @@
 
   /* --- position ----------------------------------------------------------- */
 
+  /* Size the window the way the browser's own Picture-in-Picture window is:
+     exactly the video's aspect ratio, no letterboxing, with a sane cap on
+     both dimensions so tall phone clips stay on screen. */
+  function sizeToVideo() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+    video.style.aspectRatio = `${vw} / ${vh}`;
+    const maxW = Math.min(420, innerWidth * 0.92);
+    const maxH = Math.round(innerHeight * 0.55);
+    surface.style.width = Math.round(Math.min(maxW, maxH * (vw / vh))) + 'px';
+  }
+
   function defaultX() { return clampX(innerWidth - surface.offsetWidth - 22); }
   function defaultY() { return clampY(innerHeight - surface.offsetHeight - DOCK_CLEAR - 14); }
 
@@ -405,7 +433,6 @@
       }
     });
 
-    badge.textContent = `${state.index + 1} / ${n}`;
     titleLbl.textContent = itemTitle(item);
     titleLbl.title = item.filename || itemTitle(item);
     // The tray is the page's own (showPlayingThumb on the scanner); announce
@@ -533,10 +560,10 @@
     }
     state.skips += 1;
     if (state.skips >= MAX_AUTO_SKIPS) {
-      badge.textContent = 'stalled — press next';
+      titleLbl.textContent = 'stalled — press next';
       return;
     }
-    badge.textContent = 'skipping…';
+    titleLbl.textContent = 'skipping…';
     skipTimer = setTimeout(() => advance(1), 1200);
   }
 
