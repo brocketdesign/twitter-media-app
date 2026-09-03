@@ -1415,32 +1415,67 @@ async function downloadZip() {
   if (part.length) parts.push(part);
 
   const base = `${username}_${currentTab}`;
+  const t0 = performance.now();
   try {
     for (let i = 0; i < parts.length; i++) {
       const suffix = parts.length > 1 ? `_part${i + 1}of${parts.length}` : '';
       setStatus(`<span class="spinner"></span>Building ZIP ${i + 1} of ${parts.length}…`, '');
-      const res = await fetch('/api/zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: `${base}${suffix}`,
-          items: parts[i].map(it => ({ url: it.url, name: it.filename })),
-        }),
-      });
-      if (!res.ok) { setStatus(`ZIP ${i + 1} of ${parts.length} failed.`, 'err'); return; }
-      const blob = await res.blob();
+      const part = parts[i];
+      const phase = () => `part ${i + 1}/${parts.length} of @${username} ` +
+        `[${currentTab}] (${part.length} items, ${Math.round((performance.now() - t0) / 1000)}s in)`;
+      let res;
+      try {
+        res = await fetch('/api/zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: `${base}${suffix}`,
+            username,
+            tab: currentTab,
+            items: part.map(it => ({ url: it.url, name: it.filename })),
+          }),
+        });
+      } catch (e) {
+        // The request never got an answer: offline, blocked by an extension,
+        // or the connection dropped before the server's (streamed) headers.
+        console.error(`[zip] ${phase()} — request failed before a response:`,
+          { error: String(e), online: navigator.onLine, items: part.map(it => it.filename) });
+        throw new Error(`${phase()} — the request never reached the server ` +
+          `(${String(e)}${navigator.onLine ? '' : ', browser is offline'})`);
+      }
+      if (!res.ok) {
+        let detail = '';
+        try { detail = (await res.text()).slice(0, 300); } catch (_) {}
+        console.error(`[zip] ${phase()} — server said ${res.status}:`, detail,
+          { items: part.map(it => it.filename) });
+        throw new Error(`${phase()} — server rejected it (HTTP ${res.status}) ${detail}`);
+      }
+      let blob;
+      try {
+        blob = await res.blob();
+      } catch (e) {
+        // Headers arrived (streaming), but the body died partway — a proxy or
+        // network cut. The browser reports it as the same vague TypeError.
+        console.error(`[zip] ${phase()} — connection cut while receiving the ` +
+          `archive:`, { error: String(e), online: navigator.onLine });
+        throw new Error(`${phase()} — the connection dropped while the ZIP was ` +
+          `streaming (${String(e)})`);
+      }
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${base}${suffix}.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
+      console.info(`[zip] ${phase()} — received ${blob.size} bytes, download triggered.`);
       // Everything in the part just saved counts as downloaded from now on.
-      markDownloaded(parts[i].map(it => it.url));
+      markDownloaded(part.map(it => it.url));
       if (i < parts.length - 1) await new Promise(r => setTimeout(r, 800));
     }
     setStatus(parts.length > 1 ? `Downloaded ${parts.length} ZIPs.` : 'ZIP downloaded.', 'ok');
   } catch (e) {
-    setStatus('ZIP failed: ' + e, 'err');
+    console.error(`[zip] @${username} [${currentTab}] failed after ` +
+      `${Math.round((performance.now() - t0) / 1000)}s:`, e);
+    setStatus('ZIP failed: ' + e.message, 'err');
   } finally {
     zipBtn.disabled = false;
   }

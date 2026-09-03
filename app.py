@@ -724,8 +724,19 @@ def zip_all():
     data = request.get_json(force=True, silent=True) or {}
     items = data.get("items") or []
     label = re.sub(r"[^\w.\-]", "_", str(data.get("label") or "media"))
+    # The account and tab the client is zipping — carried through to every log
+    # line so a failure can be tied to whose media was being fetched. Never log
+    # the request's other contents: cookies never reach logs anywhere here.
+    username = str(data.get("username") or "").lstrip("@") or "unknown"
+    tab = str(data.get("tab") or "unknown")
+    started = time.time()
     if not items or len(items) > 200:
+        print(f"[zip] @{username} [{tab}] REJECTED: {len(items)} items "
+              f"(need 1-200), label={label}", flush=True)
         return jsonify({"error": "Need 1-200 items."}), 400
+
+    def log(msg):
+        print(f"[zip] @{username} [{tab}] part={label} {msg}", flush=True)
 
     # The archive is streamed while it is built: a big part can take minutes,
     # and holding the response silent that long gets the connection killed by
@@ -761,27 +772,80 @@ def zip_all():
     def gen():
         zf = zipfile.ZipFile(pipe, "w", zipfile.ZIP_DEFLATED)
         used = set()
+        ok = skipped = failed = 0
+        bytes_in = 0
         try:
-            for it in items:
+            log(f"START items={len(items)}")
+            for idx, it in enumerate(items):
                 url = it.get("url", "")
-                if not _check_media_url(url):
-                    continue
                 name = re.sub(r"[^\w.\-]", "_", it.get("name") or "media")
+                if not _check_media_url(url):
+                    skipped += 1
+                    log(f"item {idx} SKIP name={name} url={url!r} (url not on the "
+                        f"allowed media hosts)")
+                    continue
                 while name in used:
                     name = "_" + name
                 used.add(name)
+                t0 = time.time()
                 try:
                     r = requests.get(url, headers=MEDIA_HEADERS, timeout=60, stream=True)
-                    r.raise_for_status()
+                    if r.status_code != 200:
+                        # Non-200s carry the code and, briefly, the content type —
+                        # enough to tell expired CDN entries from auth walls.
+                        failed += 1
+                        log(f"item {idx} FAIL name={name} url={url!r} "
+                            f"http={r.status_code} content_type="
+                            f"{r.headers.get('Content-Type', '?')} "
+                            f"after {time.time() - t0:.1f}s")
+                        r.close()
+                        continue
+                    clen = r.headers.get("Content-Length")
+                    entry_bytes = 0
                     with zf.open(name, "w") as dst:
                         for chunk in r.iter_content(256 * 1024):
                             dst.write(chunk)
-                except requests.RequestException:
+                            entry_bytes += len(chunk)
+                    ok += 1
+                    bytes_in += entry_bytes
+                    # Slow or size-mismatched fetches point at throttling and
+                    # truncated CDN responses — the two silent zip corrupters.
+                    dur = time.time() - t0
+                    if dur > 20 or (clen and entry_bytes != int(clen)):
+                        log(f"item {idx} SLOW? name={name} url={url!r} "
+                            f"{entry_bytes} bytes (content-length={clen}) "
+                            f"in {dur:.1f}s")
+                except requests.RequestException as e:
+                    failed += 1
+                    log(f"item {idx} FAIL name={name} url={url!r} "
+                        f"{type(e).__name__}: {e} after {time.time() - t0:.1f}s")
+                    continue
+                except Exception as e:
+                    # Anything non-requests (zip internals, memory) would
+                    # otherwise vanish behind a mid-stream client error.
+                    failed += 1
+                    import traceback
+                    log(f"item {idx} UNEXPECTED name={name} url={url!r} "
+                        f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
                     continue
                 # Drain whatever the zipper buffered so the response keeps moving.
                 while pipe._buf:
                     yield pipe._buf.popleft()
             zf.close()
+            log(f"DONE ok={ok} failed={failed} skipped={skipped} "
+                f"zip={pipe._pos} bytes media={bytes_in} bytes "
+                f"in {time.time() - started:.1f}s")
+        except GeneratorExit:
+            # The client (or proxy) hung up mid-stream — expected on the
+            # browser's network hiccups, worth seeing in the log.
+            log(f"CLIENT DISCONNECTED mid-stream after {time.time() - started:.1f}s "
+                f"(ok={ok} failed={failed} of {len(items)} items, "
+                f"{pipe._pos} zip bytes sent)")
+            raise
+        except Exception as e:
+            import traceback
+            log(f"GENERATOR CRASHED {type(e).__name__}: {e}\n{traceback.format_exc()}")
+            raise
         finally:
             try:
                 zf.close()
