@@ -1400,10 +1400,9 @@ async function downloadZip() {
 
   // One big archive times out (and trips the API's 200-item cap) on large
   // tabs, so the batch is split into parts; videos are heavier, so fewer
-  // of them go into each ZIP — small parts also survive restrictive
-  // proxies (VPN middleboxes kill big streaming responses mid-flight).
+  // of them go into each ZIP.
   const IMAGES_PER_ZIP = 100;
-  const VIDEOS_PER_ZIP = 20;
+  const VIDEOS_PER_ZIP = 50;
   const parts = [];
   let part = [], images = 0, videos = 0;
   for (const it of items) {

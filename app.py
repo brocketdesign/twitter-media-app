@@ -738,6 +738,19 @@ def zip_all():
     def log(msg):
         print(f"[zip] @{username} [{tab}] part={label} {msg}", flush=True)
 
+    # Who is pulling the stream, and through which edge — the cutoff signature
+    # (same bytes every time) points at a middlebox, so record the hops we can
+    # see. Cookies and auth headers are never logged.
+    environ = request.environ
+    log("REQUEST proto=%s ua=%r enc=%r cf_ray=%s client=%s" % (
+        environ.get("SERVER_PROTOCOL", "?"),
+        str(environ.get("HTTP_USER_AGENT", ""))[:80],
+        environ.get("HTTP_ACCEPT_ENCODING", "?"),
+        environ.get("HTTP_CF_RAY", "-"),
+        (environ.get("HTTP_CF_CONNECTING_IP")
+         or environ.get("REMOTE_ADDR", "?")).rsplit(".", 1)[0] + ".x",
+    ))
+
     # The archive is streamed while it is built: a big part can take minutes,
     # and holding the response silent that long gets the connection killed by
     # the proxy (the browser then just sees "Failed to fetch").
@@ -774,6 +787,20 @@ def zip_all():
         used = set()
         ok = skipped = failed = 0
         bytes_in = 0
+        sent = 0  # bytes actually handed to the socket, vs produced
+
+        def drain():
+            nonlocal sent
+            while pipe._buf:
+                chunk = pipe._buf.popleft()
+                sent += len(chunk)
+                yield chunk
+                # Heartbeat every 32MB: a mid-stream cutoff shows up as a last
+                # progress line right before the disconnect, telling us whether
+                # the client stopped at a round number (middlebox buffer cap).
+                if sent // (32 * 1024 * 1024) > (sent - len(chunk)) // (32 * 1024 * 1024):
+                    log(f"progress sent={sent} produced={pipe._pos} "
+                        f"at {time.time() - started:.1f}s")
         try:
             log(f"START items={len(items)}")
             for idx, it in enumerate(items):
@@ -829,8 +856,7 @@ def zip_all():
                         f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
                     continue
                 # Drain whatever the zipper buffered so the response keeps moving.
-                while pipe._buf:
-                    yield pipe._buf.popleft()
+                yield from drain()
             zf.close()
             log(f"DONE ok={ok} failed={failed} skipped={skipped} "
                 f"zip={pipe._pos} bytes media={bytes_in} bytes "
@@ -840,7 +866,7 @@ def zip_all():
             # browser's network hiccups, worth seeing in the log.
             log(f"CLIENT DISCONNECTED mid-stream after {time.time() - started:.1f}s "
                 f"(ok={ok} failed={failed} of {len(items)} items, "
-                f"{pipe._pos} zip bytes sent)")
+                f"{pipe._pos} zip bytes produced, {sent} handed to the socket)")
             raise
         except Exception as e:
             import traceback
@@ -851,8 +877,7 @@ def zip_all():
                 zf.close()
             except Exception:
                 pass
-        while pipe._buf:
-            yield pipe._buf.popleft()
+        yield from drain()
 
     return Response(
         stream_with_context(gen()),
