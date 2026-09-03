@@ -10,6 +10,8 @@
   noindex=True
 ) }}
 <link rel="stylesheet" href="{{ static_v('base.css') }}">
+<link rel="stylesheet" href="{{ static_v('floatplayer.css') }}">
+<script src="{{ static_v('floatplayer.js') }}" defer></script>
 <style>
   /* Each column stacks its own cards so the media card sits under the publish
      card in the main column instead of wrapping back under the profile. The
@@ -120,6 +122,7 @@
             <button class="tab" id="tab-videos" onclick="showTab('videos')">Videos (0)</button>
           </div>
           <span class="muted" id="mediaHint"></span>
+          <button class="secondary" id="charAutoBtn" onclick="charAutoPlay()" hidden>Auto-play</button>
         </div>
 
         <div class="drop" id="drop" style="margin-top:16px">
@@ -191,6 +194,30 @@ function counts() {
   const stagedVid = staged.filter(f => kindOf(f.name) === 'videos').length;
   $('tab-images').textContent = `Images (${media.images.length + stagedImg})`;
   $('tab-videos').textContent = `Videos (${media.videos.length + stagedVid})`;
+  const autoBtn = $('charAutoBtn');
+  if (autoBtn) {
+    autoBtn.hidden = !media.videos.length;
+    autoBtn.title = media.videos.length
+      ? `Play all ${media.videos.length} video(s) one by one in the floating player`
+      : 'No videos yet';
+  }
+}
+
+/* Feed this character's videos to the shared floating player (it keeps
+   running across pages, so the queue continues on the scanner or gallery). */
+function charAutoPlay() {
+  if (!media.videos.length || !window.FloatPlayer) return;
+  FloatPlayer.start(media.videos.map(m => ({
+    origin: `/media/${CHAR_ID}/${m.filename}`,
+    srcs: [`/media/${CHAR_ID}/${m.filename}`],
+    poster: '',
+    filename: m.original_name || m.filename,
+    text: (m.caption || '').slice(0, 140),
+    user: '',
+    date: '',
+    duration: 0,
+    tweet_url: m.tweet_url || '',
+  })), 0);
 }
 
 function renderGrid() {

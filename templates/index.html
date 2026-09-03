@@ -924,14 +924,20 @@ function renderGrid() {
 }
 
 /* --- floating played-videos tray --------------------------------------
-   Every video the user clicks in the grid drops a thumbnail into one
-   docked, horizontally scrolling tray: on a large grid the clips you
-   have played stay one tap away, the one now playing keeps a lit edge,
-   and tapping any thumbnail scrolls back to its cell. */
+   Every video the user plays — clicked in the grid or started by the
+   floating auto-play player — drops a thumbnail into one docked, horizontally
+   scrolling tray: on a large grid the clips you have played stay one tap
+   away, the one now playing keeps a lit edge, and tapping any thumbnail
+   switches the floating player to it (or, without the player, scrolls back
+   to its cell). One thumbnail system serves both. */
 
-let playedTray = [];   // clicked videos, most recent first
+let playedTray = [];   // played videos, most recent first
 
-function hidePlayingThumb() {
+function hidePlayingThumb(force) {
+  // While the floating player runs, the tray is its session log — a re-render
+  // (tab or view switch) must not wipe it. force=true comes from the player
+  // itself when the session ends.
+  if (!force && window.FloatPlayer && FloatPlayer.isActive()) return;
   playedTray = [];
   const strip = document.getElementById('vstrip');
   strip.hidden = true;
@@ -944,7 +950,7 @@ function showPlayingThumb(item) {
   const strip = document.getElementById('vstrip');
   strip.innerHTML = playedTray.map((it, i) => `
     <button type="button" class="sthumb${i === 0 ? ' playing' : ''}"
-            data-url="${escapeHtml(it.url)}" title="Scroll back to this video">
+            data-url="${escapeHtml(it.url)}" title="Jump to this video">
       ${it.poster
         ? `<img loading="lazy" src="${escapeHtml(it.poster)}" alt=""
                data-src="${escapeHtml(it.poster)}" onerror="posterFallback(this)">`
@@ -960,12 +966,57 @@ function showPlayingThumb(item) {
 }
 
 function jumpToVideo(url) {
+  // With the floating player running, a tray click switches what it plays
+  // instead of scrolling the grid.
+  if (window.FloatPlayer && FloatPlayer.isActive()) {
+    if (!FloatPlayer.jumpTo(url)) {
+      FloatPlayer.start(floatItems(), Math.max(0, data.videos.findIndex(v => v.url === url)));
+    }
+    return;
+  }
   const cell = document.getElementById('cell-' + hashId(url));
   if (!cell) return;
   cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
   cell.classList.add('spotlit');
   setTimeout(() => cell.classList.remove('spotlit'), 1600);
 }
+
+/* The floating player (static/floatplayer.js) announces every clip it starts
+   and ends its session with events, so its thumbnails land in this page's own
+   tray — the same list the grid clicks fill — without the player knowing
+   anything about the tray itself. */
+window.addEventListener('floatplayer:playing', e => {
+  const it = e.detail || {};
+  showPlayingThumb({
+    url: it.origin,
+    poster: it.poster,
+    duration: it.duration,
+    filename: it.filename,
+    text: it.text,
+    user: it.user,
+    date: it.date,
+    tweet_url: it.tweet_url,
+  });
+});
+/* Clips that had no poster get a real frame pulled from the video after they
+   start — swap it into the tray thumbnail in place of the ▶ glyph. The patch
+   is done in place: a frame arriving for a clip that already advanced must
+   not reorder the tray or steal the playing edge. */
+window.addEventListener('floatplayer:thumb', e => {
+  const d = e.detail || {};
+  const it = playedTray.find(i => i.url === d.origin);
+  if (!it) return;
+  it.poster = d.poster;
+  const btn = [...document.querySelectorAll('#vstrip .sthumb')]
+    .find(b => b.dataset.url === d.origin);
+  if (!btn) return;
+  const img = document.createElement('img');
+  img.alt = '';
+  img.src = d.poster;
+  const old = btn.querySelector('img, .noimg');
+  if (old) old.replaceWith(img); else btn.prepend(img);
+});
+window.addEventListener('floatplayer:closed', () => hidePlayingThumb(true));
 
 /* --- feed view -------------------------------------------------------
    A full-screen player over the page: one video per screen (two side by
