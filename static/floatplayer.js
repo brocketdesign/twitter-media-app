@@ -280,6 +280,17 @@
       if (state.placed) place(clampX(state.x), clampY(state.y));
       if (bar.classList.contains('show')) showBar();
     });
+
+    // Leaving the tab pops the video into the floating Picture-in-Picture
+    // window, so it stays on screen over whatever the user navigates to.
+    // Browsers gate this behind user activation and some refuse it outright;
+    // where it is refused this quietly does nothing and the toolbar's PiP
+    // button remains the way.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden || !state.active || state.pip || video.paused ||
+          !document.pictureInPictureEnabled) return;
+      video.requestPictureInPicture().catch(() => {});
+    });
   }
 
   /* --- the control toolbar ------------------------------------------------- */
