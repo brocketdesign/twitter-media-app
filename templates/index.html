@@ -86,6 +86,8 @@
         <button type="button" class="secondary" id="fillCookiesBtn" onclick="fillFromSession()">Fill from my X session</button>
         <button type="button" class="secondary" id="checkCookiesBtn" onclick="checkCookies()">Check cookies</button>
         <button type="button" class="secondary" id="clearCookiesBtn" onclick="clearCookies()">Clear saved cookies</button>
+        <button type="button" class="secondary" id="copyLinkBtn" onclick="copyCookieLink()"
+                title="Copy a link that carries the cookies — opening it in another browser fills them in there">Copy link for another device</button>
       </div>
       <div id="cookieMsg" class="msg"></div>
       <details id="cookieAdv">
@@ -610,6 +612,64 @@ async function checkCookies() {
     setCookieMsg('Could not run the check: ' + escapeHtml(String(e)), 'err');
   } finally {
     btn.disabled = false;
+  }
+}
+
+/* --- cookie transfer link ----------------------------------------------
+   The cookies ride in the URL's hash fragment, so they never hit the server
+   or its logs — the browser keeps a fragment local. Opening the link in
+   another browser on the same origin imports them into that browser's local
+   storage, then scrubs them from the address bar. */
+
+const COOKIE_LINK_PREFIX = '#ck=';
+
+function cookieLink() {
+  const pairs = parseCookieText(currentCookies());
+  const payload = encodeURIComponent(btoa(serializeCookies(pairs)));
+  return location.origin + location.pathname + COOKIE_LINK_PREFIX + payload;
+}
+
+function cookiesFromLink() {
+  if (!location.hash.startsWith(COOKIE_LINK_PREFIX)) return null;
+  let blob = '';
+  try { blob = atob(decodeURIComponent(location.hash.slice(COOKIE_LINK_PREFIX.length))); }
+  catch (e) { return ''; }
+  return blob;
+}
+
+function importCookieLink() {
+  const blob = cookiesFromLink();
+  if (blob === null) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  const pairs = parseCookieText(blob);
+  if (!Object.keys(pairs).length) return;
+  writeCookies(pairs, null);
+  document.getElementById('cookieBox').open = true;
+  setCookieMsg('Login cookies imported from the link. They now live in this '
+    + 'browser\'s local storage — hit <b>Check cookies</b> to confirm the '
+    + 'session still works here.', 'ok');
+}
+
+async function copyCookieLink() {
+  const btn = document.getElementById('copyLinkBtn');
+  const pairs = parseCookieText(currentCookies());
+  if (missingCookies(pairs).length) {
+    focusCookies('Save a working session first (auth_token + ct0), then copy '
+                 + 'the link — it would carry nothing useful now.', 'warn');
+    return;
+  }
+  const url = cookieLink();
+  try {
+    await navigator.clipboard.writeText(url);
+    setCookieMsg('Link copied — open it in the other browser and the login '
+      + 'cookies are filled in there automatically.<br><small>Anyone holding '
+      + 'this link is signed in as you: share it only with your own devices.</small>', 'ok');
+  } catch (e) {
+    // Clipboard can be refused (older mobile browsers, no user gesture) —
+    // show the link so it can be copied by hand instead.
+    setCookieMsg('Could not copy automatically — long-press / copy this '
+      + 'link:<br><textarea rows="2" readonly style="width:100%;font-size:12px;'
+      + 'word-break:break-all" onclick="this.select()">' + escapeHtml(url) + '</textarea>', 'warn');
   }
 }
 
@@ -1732,6 +1792,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) takeExtensionHandoff();
 });
 
+importCookieLink();
 initCookies();
 initFillButton();
 renderHistory();
