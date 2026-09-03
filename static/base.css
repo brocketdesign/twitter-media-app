@@ -330,6 +330,13 @@ body.feed-open { overflow: hidden; }     /* the page behind must not scroll alon
 .feedtrack .empty { color: var(--muted); align-self: center; text-align: center; padding: 24px; }
 .fcell { position: relative; height: 100%; overflow: hidden; background: #000; scroll-snap-align: start; }
 .fcell video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+/* thin line hugging the foot of each cell: shows how far the video is, so a
+   viewer can tell which one is about to end and move to the next */
+.fprog {
+  position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 3px;
+  background: rgba(255, 255, 255, .18); pointer-events: none;
+}
+.fprog span { display: block; height: 100%; width: 0; background: var(--accent); }
 
 /* controls float over the video, out of the way of the exit button */
 .fexit {

@@ -1091,7 +1091,8 @@ function renderFeed() {
       <video playsinline muted preload="none"></video>
       <input class="fpick" type="checkbox" title="Select for sending">
       <span class="dlbadge fdledge" hidden title="Already downloaded to this machine">${ICON_SAVED}</span>
-      <div class="finfo"></div>`;
+      <div class="finfo"></div>
+      <div class="fprog"><span></span></div>`;
     cell.addEventListener('click', e => {
       if (e.target.closest('a, input, .rt')) return;
       toggleFeedSound();
@@ -1118,6 +1119,12 @@ function renderFeed() {
     // A play() the browser turned down still leaves autoplay armed, so try
     // again the moment there are frames to show.
     video.addEventListener('canplay', () => { if (entry.visible) playFeedVideo(entry); });
+    video.addEventListener('timeupdate', () => {
+      // The little foot line: how far this video has to go before it swaps.
+      if (!entry.item) return;
+      const frac = video.duration ? video.currentTime / video.duration : 0;
+      entry.cell.querySelector('.fprog span').style.width = `${Math.min(100, frac * 100)}%`;
+    });
     video.addEventListener('ended', () => {
       if (entry.dead || !entry.item) return;
       advanceFeedCell(entry);
@@ -1182,6 +1189,7 @@ function fillFeedCell(entry, index) {
   entry.video.autoplay = false;
   entry.video.removeAttribute('src');
   entry.video.load();
+  entry.cell.querySelector('.fprog span').style.width = '0';
   markFeedDownloaded(entry);
 }
 
