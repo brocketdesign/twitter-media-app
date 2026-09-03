@@ -882,8 +882,11 @@ def zip_all():
     return Response(
         stream_with_context(gen()),
         headers={
-            "Content-Disposition": f'attachment; filename="{label}.zip"',
             "Content-Type": "application/zip",
+            # No Content-Disposition here on purpose: Chromium aborts fetch()
+            # responses that declare an attachment (TypeError: Failed to
+            # fetch, net::ERR_FAILED on a 200) the moment the headers arrive.
+            # The browser names the file client-side via <a download>.
         },
     )
 
